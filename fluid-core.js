@@ -37,10 +37,12 @@
     pressureIters: 40,   // Gauss-Seidel iterations per substep
     overRelax: 1.9,
     driftK: 1.0,         // pushes compressed regions apart (keeps volume)
+    driftShare: 0.4,     // share of the excess packing removed per substep
     separateIters: 2,    // particle push-apart passes
     minSubsteps: 1,
     maxSubsteps: 4,      // substeps grow when particles move fast
     cflCells: 2.0,       // allowed travel per substep, in cells
+    gravCells: 0.45,     // ... and how far gravity alone may move water per substep: small tanks need more steps
     blurPasses: 2,       // field smoothing (each pass ~ half a cell)
   };
 
@@ -189,7 +191,12 @@
     step(dt) {
       if (!(dt > 0)) return;
       const P = this.params;
-      const n = clamp(Math.ceil(this.maxSpeed * dt / (this.h * P.cflCells)), P.minSubsteps, P.maxSubsteps);
+      // Substeps: enough that the fastest particle crosses at most cflCells per
+      // step, and that gravity alone moves water at most gravCells (g sdt^2 < gravCells h).
+      // Without the second rule a small tank (cells of a few mm) jitters and splashes at rest.
+      const g = Math.hypot(this.gx, this.gy);
+      const nGrav = Math.ceil(Math.sqrt(g * dt * dt / (this.h * (P.gravCells ?? 0.45))));
+      const n = clamp(Math.max(Math.ceil(this.maxSpeed * dt / (this.h * P.cflCells)), nGrav), P.minSubsteps, P.maxSubsteps);
       this.lastSubsteps = n;
       const sdt = dt / n;
       for (let k = 0; k < n; k++) {
