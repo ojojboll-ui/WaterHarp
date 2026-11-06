@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05080c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>WaterHarp</title>
+<style>
+/* The whole instrument lives on one landscape stage. In a portrait window
+   (an iPhone with rotation lock on, held sideways) the stage is turned a
+   quarter so it still stands upright in the hand. */
+:root {
+  --ink: #05080c;
+  --panel: rgba(12, 18, 26, 0.92);
+  --line: rgba(150, 190, 220, 0.16);
+  --text: #d8e6f0;
+  --dim: #7f95a6;
+  --accent: #4fc3ff;
+  --warn: #ffb347;
+  --ui: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font: 14px/1.35 var(--ui); overflow: hidden;
+  overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#insets { position: fixed; visibility: hidden; pointer-events: none;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+
+#stage { position: fixed; left: 0; top: 0; transform-origin: 0 0; touch-action: none; overflow: hidden; }
+#chords { position: absolute; display: flex; flex-direction: column; gap: 6px; }
+.chord { flex: 1 1 0; min-height: 0; border: 1px solid var(--line); background: rgba(20, 32, 46, 0.72); border-radius: 12px;
+  font-weight: 650; font-size: 18px; letter-spacing: 0.02em; touch-action: none; cursor: pointer; transition: background 0.08s; }
+.chord.on { background: rgba(79, 195, 255, 0.24); border-color: var(--accent); color: #fff; box-shadow: inset 0 0 18px rgba(79, 195, 255, 0.35); }
+.chord small { display: block; font: 10px var(--mono); color: var(--dim); font-weight: 400; margin-top: 2px; }
+#tank { position: absolute; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #06090d; }
+#tank canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#ov { pointer-events: none; }
+#right { position: absolute; display: flex; flex-direction: column; gap: 8px; }
+#tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill { border: 1px solid var(--line); background: rgba(20, 32, 46, 0.72); border-radius: 999px; padding: 8px 12px; cursor: pointer; white-space: nowrap; font-size: 13px; }
+.pill:active { transform: scale(0.97); }
+.pill.on { border-color: var(--accent); color: var(--accent); }
+#btnSensor .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 6px; vertical-align: 1px; }
+#btnSensor.live .dot { background: #5fe08a; box-shadow: 0 0 6px #5fe08a; }
+#btnSensor.warn { border-color: var(--warn); color: var(--warn); }
+#btnSensor.warn .dot { background: var(--warn); }
+#fx { flex: 1; min-height: 0; border: 1px dashed var(--line); border-radius: 14px; display: flex; align-items: center; justify-content: center;
+  text-align: center; color: var(--dim); font-size: 12px; padding: 12px; }
+
+#sheet { position: absolute; top: 0; right: 0; height: 100%; width: min(360px, 70%); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: var(--panel); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-left: 1px solid var(--line);
+  padding: 4px 16px 18px; transform: translateX(105%); transition: transform 0.2s ease; z-index: 5; touch-action: pan-y; }
+#sheet.open { transform: none; }
+@media (prefers-reduced-motion: reduce) { #sheet { transition: none; } }
+.phead { position: sticky; top: -4px; display: flex; align-items: center; justify-content: space-between; padding: 10px 0 8px;
+  background: linear-gradient(var(--panel) 70%, transparent); z-index: 1; }
+.phead b { font-size: 16px; }
+.phead button { border: 0; background: none; color: var(--dim); padding: 6px 4px; cursor: pointer; }
+h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.row output { font: 12px var(--mono); color: var(--accent); align-self: center; }
+.row small { grid-column: 1 / -1; color: var(--dim); font-size: 12px; }
+.row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 6px 0 2px; accent-color: var(--accent); height: 26px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 4px; }
+.seg button { flex: 1 1 auto; min-width: 58px; border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 8px 6px; cursor: pointer; }
+.seg button.on { border-color: var(--accent); color: var(--accent); background: rgba(79, 195, 255, 0.08); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.note { color: var(--dim); font-size: 12px; margin: 10px 0 0; }
+#stats { font: 11px/1.4 var(--mono); color: var(--dim); white-space: pre; margin-top: 10px; }
+#qr { margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+#qr img, #qr canvas { width: 104px !important; height: 104px !important; background: #fff; padding: 6px; border-radius: 8px; }
+#qr code { font: 11px var(--mono); word-break: break-all; }
+#toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
+  padding: 8px 14px; border-radius: 10px; font-size: 13px; z-index: 9; max-width: 80%; text-align: center; }
+
+#start { position: absolute; inset: 0; background: rgba(5, 8, 12, 0.93); display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; z-index: 10; text-align: center; padding: 20px; }
+#start h1 { margin: 0; font-size: 30px; letter-spacing: 0.05em; font-weight: 700; }
+#start p { margin: 0; color: var(--dim); max-width: 32em; }
+#start button { border: 1px solid var(--accent); color: var(--accent); background: rgba(79, 195, 255, 0.1); border-radius: 999px;
+  padding: 12px 34px; font-size: 17px; cursor: pointer; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="insets"></div>
+<div id="stage">
+  <div id="chords" aria-label="Chord buttons"></div>
+  <div id="tank"><canvas id="c" aria-label="Water over the strings: drag to make waves"></canvas><canvas id="ov"></canvas></div>
+  <div id="right">
+    <div id="tools">
+      <button class="pill" id="btnSensor"><span class="dot"></span><span>Tilt</span></button>
+      <button class="pill" id="btnSheet">Settings</button>
+    </div>
+    <div id="fx">Effects pad<br>filter · space · modulation<br><br>coming in step 3</div>
+  </div>
+  <aside id="sheet" aria-label="Settings">
+    <div class="phead"><b>WaterHarp</b><button id="btnClose">Close</button></div>
+    <div id="controls"></div>
+    <div class="actions">
+      <button class="pill" id="btnReset">Reset water</button>
+      <button class="pill" id="btnDefaults">Defaults</button>
+      <button class="pill" id="btnFull">Full screen</button>
+    </div>
+    <p class="note">Hold a chord on the left, then tilt the phone or drag through the water. On a computer: hold keys 1–6 for chords, arrow keys to tilt.</p>
+    <div id="qrbox" hidden><h3>Open on your phone</h3><div id="qr"></div></div>
+    <div id="stats"></div>
+  </aside>
+  <div id="toast" hidden></div>
+  <div id="start">
+    <h1>WaterHarp</h1>
+    <p>Hold a chord with your left thumb. Tilt the phone, or drag through the water, and the waves strum the strings.</p>
+    <p>On an iPhone, turn on rotation lock first: the harp turns itself to fit the way you hold it.</p>
+    <button id="btnStart">Start</button>
+  </div>
+</div>
+
+<script src="fluid-core.js"></script>
+<script src="strum.js"></script>
+<script src="engine.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const G0 = 9.81;
+const MOBILE = /Android|iPhone|iPad|Mobi/.test(navigator.userAgent);
+const E = TouchGrassEngine();                 // for plate(), the notes on the strings
+const STRINGS = 13;
+
+/* ---------- settings ---------- */
+const DEFAULTS = {
+  voice: 1, ring: 3.5, pad: 0.35, volume: 0.9,
+  size: 0.35, fill: 0.3, sens: 1, gravity: 1, inertia: 1, invert: 'auto',
+  chords: [[0, 0], [7, 0], [9, 1], [5, 0], [2, 1], [4, 1]],   // C G Am F Dm Em
+};
+let S = JSON.parse(JSON.stringify(DEFAULTS));
+try { Object.assign(S, JSON.parse(localStorage.getItem('waterharp.settings') || '{}')); } catch (e) {}
+const save = () => { try { localStorage.setItem('waterharp.settings', JSON.stringify(S)); } catch (e) {} };
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const KIND = ['', 'm', '7', 'maj7', 'm7'];
+const chordName = (r, q) => NOTE_NAMES[r] + KIND[q];
+const noteName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+const VOICE_NAMES = { 1: 'Harp', 0: 'Omni', 2: 'Vibes', 3: 'Guitar', 4: 'Cello', 5: 'Ney', 6: 'Juno' };
+
+/* ---------- stage: always landscape ---------- */
+let view = { vw: 1, vh: 1, dpr: 1, rot: 0, SW: 1, SH: 1 };
+let tank = { x: 0, y: 0, w: 1, h: 1 };   // stage px
+const stage = $('#stage');
+function insets() {
+  const cs = getComputedStyle($('#insets'));
+  return { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 };
+}
+function layout() {
+  const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
+  const portrait = vh > vw;
+  const rot = portrait ? (view.rot === -90 ? -90 : 90) : 0;
+  const SW = portrait ? vh : vw, SH = portrait ? vw : vh;
+  view = { vw, vh, dpr: Math.min(window.devicePixelRatio || 1, 2.5), rot, SW, SH };
+  stage.style.width = SW + 'px'; stage.style.height = SH + 'px';
+  stage.style.transform = rot === 90 ? `translate(${vw}px,0) rotate(90deg)` : rot === -90 ? `translate(0,${vh}px) rotate(-90deg)` : 'none';
+  // safe areas in stage terms: which screen edge each stage edge sits on
+  const i = insets();
+  const pad = rot === 90 ? { l: i.t, r: i.b, t: i.r, b: i.l } : rot === -90 ? { l: i.b, r: i.t, t: i.l, b: i.r } : { l: i.l, r: i.r, t: i.t, b: i.b };
+  const m = 8, L = Math.max(m, pad.l), R = Math.max(m, pad.r), T = Math.max(m, pad.t), B = Math.max(m, pad.b);
+  const leftW = clamp(SW * 0.15, 92, 150), rightW = clamp(SW * 0.21, 132, 230), gap = 8;
+  const ch = $('#chords'), rt = $('#right'), tk = $('#tank');
+  Object.assign(ch.style, { left: L + 'px', top: T + 'px', width: leftW + 'px', height: (SH - T - B) + 'px' });
+  Object.assign(rt.style, { right: R + 'px', top: T + 'px', width: rightW + 'px', height: (SH - T - B) + 'px' });
+  tank = { x: L + leftW + gap, y: T, w: Math.max(40, SW - L - R - leftW - rightW - 2 * gap), h: Math.max(40, SH - T - B) };
+  Object.assign(tk.style, { left: tank.x + 'px', top: tank.y + 'px', width: tank.w + 'px', height: tank.h + 'px' });
+  for (const c of [cv, ov]) { c.width = Math.round(tank.w * view.dpr); c.height = Math.round(tank.h * view.dpr); }
+  if (gl) gl.viewport(0, 0, cv.width, cv.height);
+  const asp = tank.h / tank.w;
+  if (!sim || Math.abs(asp - sim.aspect) / asp > 0.04) rebuild();
+}
+// screen (client) coordinates -> stage coordinates
+function toStage(cx, cy) {
+  if (view.rot === 90) return [cy, view.vw - cx];
+  if (view.rot === -90) return [view.vh - cy, cx];
+  return [cx, cy];
+}
+
+/* ---------- water and strings ---------- */
+let sim = null, strum = null;
+const cv = $('#c'), ov = $('#ov'), oc = ov.getContext('2d');
+function rebuild() {
+  const g = sim ? [sim.gx, sim.gy] : [0, G0];
+  sim = new FluidCore.FluidSim({ cellsX: MOBILE ? 40 : 48, aspect: tank.h / Math.max(1, tank.w), shape: 'box', width: S.size, fill: S.fill,
+    params: { flipRatio: 0.9, damping: 0.05, pressureIters: 30 } });
+  sim.gx = g[0]; sim.gy = g[1]; sim.build();
+  strum = new WaterStrum.WaterStrum(STRINGS, { rise: 0.035 / S.sens });
+  strum.place(sim);
+}
+
+/* ---------- water renderer (Vätskelabbet's shader) ---------- */
+let gl = null, tex = null, texBuf = null; const U = {};
+const PAL = { bg: [6, 9, 13], deep: [14, 70, 150], shallow: [50, 160, 225], foam: [225, 245, 255] };
+function initGL() {
+  try { gl = cv.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: false }); } catch (e) { gl = null; }
+  if (!gl) return false;
+  const deriv = gl.getExtension('OES_standard_derivatives');
+  const vs = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+  const fs = (deriv ? '#extension GL_OES_standard_derivatives : enable\n' : '') + `
+precision mediump float;
+uniform sampler2D f; uniform vec2 size; uniform vec4 uv; uniform float thr;
+uniform vec3 bg, deep, shallow, foam;
+void main(){
+  vec2 t = vec2(gl_FragCoord.x, size.y - gl_FragCoord.y) / size;
+  vec4 s = texture2D(f, mix(uv.xy, uv.zw, clamp(t, 0.0, 1.0)));
+  float c = s.r * 2.0;
+  ${deriv ? 'float w = max(fwidth(c), 0.02);' : 'float w = 0.06;'}
+  float a = smoothstep(thr - w, thr + w, c);
+  float depth = smoothstep(thr + 0.05, thr + 0.4, c);
+  vec3 liq = mix(shallow, deep, depth);
+  liq = mix(liq, foam, smoothstep(0.35, 1.3, s.g) * 0.75);
+  liq += (1.0 - smoothstep(thr, thr + 0.18, c)) * 0.22;
+  vec3 col = mix(bg * 1.6 + 0.012, liq, a);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (e) { console.warn('WebGL off:', e); gl = null; return false; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ['f', 'size', 'uv', 'thr', 'bg', 'deep', 'shallow', 'foam']) U[n] = gl.getUniformLocation(prog, n);
+  tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  const c3 = a => a.map(x => x / 255);
+  gl.uniform3fv(U.bg, c3(PAL.bg)); gl.uniform3fv(U.deep, c3(PAL.deep)); gl.uniform3fv(U.shallow, c3(PAL.shallow)); gl.uniform3fv(U.foam, c3(PAL.foam));
+  return true;
+}
+function drawWater() {
+  if (!gl) return;
+  const fnx = sim.fnx, fny = sim.fny, n = fnx * fny;
+  if (!texBuf || texBuf.length !== n * 4) texBuf = new Uint8Array(n * 4);
+  const F = sim.F, Sp = sim.S;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const f = F[i] < 0 ? 0 : F[i];
+    texBuf[j] = f >= 2 ? 255 : f * 127.5;
+    const s = Sp[i] * 127.5; texBuf[j + 1] = s > 255 ? 255 : s;
+    texBuf[j + 2] = 0; texBuf[j + 3] = 255;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fnx, fny, 0, gl.RGBA, gl.UNSIGNED_BYTE, texBuf);
+  gl.uniform1i(U.f, 0);
+  gl.uniform2f(U.size, cv.width, cv.height);
+  gl.uniform4fv(U.uv, sim.fieldUV());
+  gl.uniform1f(U.thr, 0.45);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ---------- strings, drawn over the water ---------- */
+const glow = new Float32Array(STRINGS);
+const sparks = [];   // {k, y, t, v}
+function drawStrings(dt) {
+  const d = view.dpr, W = ov.width, H = ov.height, chord = currentChord();
+  oc.clearRect(0, 0, W, H);
+  oc.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < STRINGS; k++) {
+    glow[k] *= Math.exp(-dt / 0.4);
+    const g = glow[k], x = (k + 0.5) / STRINGS * W;
+    const base = chord ? 0.2 : 0.07;
+    oc.strokeStyle = `rgba(${Math.round(lerp(140, 235, g))},${Math.round(lerp(185, 250, g))},255,${(base + 0.75 * g).toFixed(3)})`;
+    oc.lineWidth = (1 + 2.5 * g) * d;
+    oc.beginPath(); oc.moveTo(x, 0); oc.lineTo(x, H); oc.stroke();
+  }
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i]; s.t += dt;
+    if (s.t > 0.6) { sparks.splice(i, 1); continue; }
+    const x = (s.k + 0.5) / STRINGS * W, r = (5 + 34 * s.t) * d * (0.6 + 0.6 * s.v), a = (1 - s.t / 0.6) * 0.8 * s.v;
+    oc.strokeStyle = `rgba(190,240,255,${a.toFixed(3)})`; oc.lineWidth = 2 * d;
+    oc.beginPath(); oc.ellipse(x, s.y * H, r, r * 0.35, 0, 0, Math.PI * 2); oc.stroke();
+  }
+  oc.globalCompositeOperation = 'source-over';
+  if (chord) {   // the note on each string, small along the top
+    oc.font = `${Math.round(9 * d)}px ui-monospace, Consolas, monospace`; oc.textAlign = 'center'; oc.textBaseline = 'top';
+    for (let k = 0; k < STRINGS; k++) {
+      oc.fillStyle = `rgba(160,200,230,${(0.35 + 0.6 * glow[k]).toFixed(3)})`;
+      oc.fillText(noteName(chord.notes[k]), (k + 0.5) / STRINGS * W, 6 * d);
+    }
+  }
+}
+
+/* ---------- tilt ---------- */
+const motion = { has: false, last: 0, ax: 0, ay: 9.81, lx: 0, ly: 0, linear: false, lpx: 0, lpy: 9.81, votes: 0, invert: false, side: 0 };
+function screenAngle() {
+  if (typeof window.orientation === 'number') return window.orientation;
+  return (screen.orientation && screen.orientation.angle) || 0;
+}
+window.addEventListener('devicemotion', e => {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  motion.has = true; motion.last = performance.now();
+  motion.ax = a.x; motion.ay = a.y;
+  const l = e.acceleration;
+  if (l && l.x != null) { motion.linear = true; motion.lx = l.x; motion.ly = l.y; } else motion.linear = false;
+});
+// some browsers report accelerationIncludingGravity with flipped signs: vote against the orientation's tilt
+window.addEventListener('deviceorientation', e => {
+  if (e.beta == null || !motion.has) return;
+  const sb = Math.sin(e.beta * Math.PI / 180);
+  if (Math.abs(sb) > 0.5 && Math.abs(motion.ay) > 4) {
+    motion.votes = clamp(motion.votes + (Math.sign(sb) === Math.sign(motion.ay) ? 1 : -1), -20, 20);
+    if (Math.abs(motion.votes) >= 8) motion.invert = motion.votes < 0;
+  }
+});
+const sensorAlive = () => motion.has && performance.now() - motion.last < 1500;
+const keys = { tilt: 0, angle: 0 };
+function updateGravity(dt) {
+  let gx, gy;   // in screen coordinates, y down
+  const live = sensorAlive();
+  if (live) {
+    const sign = (S.invert === 'auto' ? motion.invert : S.invert === 'yes') ? -1 : 1;
+    const ax = motion.ax * sign, ay = motion.ay * sign;
+    let gxD, gyD, lxD, lyD;
+    if (motion.linear) { lxD = motion.lx * sign; lyD = motion.ly * sign; gxD = ax - lxD; gyD = ay - lyD; }
+    else {
+      const a = 1 - Math.exp(-dt / 0.12);
+      motion.lpx += (ax - motion.lpx) * a; motion.lpy += (ay - motion.lpy) * a;
+      gxD = motion.lpx; gyD = motion.lpy; lxD = ax - gxD; lyD = ay - gyD;
+    }
+    const fx = -gxD * S.gravity - lxD * S.inertia, fy = -gyD * S.gravity - lyD * S.inertia;
+    const th = screenAngle() * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+    gx = fx * c - fy * s; gy = -(fx * s + fy * c);
+    // in a portrait window, turn the stage to the side the phone is held on
+    if (view.vh > view.vw) {
+      const want = gx > 0.55 * G0 ? -90 : gx < -0.55 * G0 ? 90 : 0;
+      motion.side = want && want !== view.rot ? motion.side + dt : 0;
+      if (motion.side > 0.4) { view.rot = want; motion.side = 0; layout(); }
+    }
+  } else {
+    // keyboard: arrows lean the tank while held
+    keys.angle += (keys.tilt * 28 - keys.angle) * (1 - Math.exp(-dt / 0.06));
+    const a = keys.angle * Math.PI / 180;
+    gx = Math.sin(a) * G0; gy = Math.cos(a) * G0;
+    if (view.rot === 90) [gx, gy] = [-gy, gx]; else if (view.rot === -90) [gx, gy] = [gy, -gx];
+  }
+  // screen -> stage
+  if (view.rot === 90) { sim.gx = gy; sim.gy = -gx; }
+  else if (view.rot === -90) { sim.gx = -gy; sim.gy = gx; }
+  else { sim.gx = gx; sim.gy = gy; }
+  return live;
+}
+
+/* ---------- a finger in the water ---------- */
+const ptr = { down: false, x: 0, y: 0, px: 0, py: 0, id: null };
+function toSim(e) {
+  const [sx, sy] = toStage(e.clientX, e.clientY);
+  return sim.tankToSim((sx - tank.x) / tank.w, (sy - tank.y) / tank.h);
+}
+cv.addEventListener('pointerdown', e => {
+  if (ptr.down) return;
+  ptr.down = true; ptr.id = e.pointerId; cv.setPointerCapture(e.pointerId);
+  [ptr.x, ptr.y] = toSim(e); ptr.px = ptr.x; ptr.py = ptr.y;
+});
+cv.addEventListener('pointermove', e => { if (ptr.down && e.pointerId === ptr.id) [ptr.x, ptr.y] = toSim(e); });
+const ptrUp = e => { if (e.pointerId === ptr.id) { ptr.down = false; ptr.id = null; } };
+cv.addEventListener('pointerup', ptrUp); cv.addEventListener('pointercancel', ptrUp);
+function updateFinger(dt) {
+  const ob = sim.obstacle;
+  ob.r = 0.08 * Math.min(sim.innerX, sim.innerY) * sim.h + sim.h * 0.5;
+  if (ptr.down) { ob.vx = (ptr.x - ptr.px) / dt; ob.vy = (ptr.y - ptr.py) / dt; ob.x = ptr.x; ob.y = ptr.y; ob.active = true; }
+  else ob.active = false;
+  ptr.px = ptr.x; ptr.py = ptr.y;
+}
+
+/* ---------- chord buttons ---------- */
+// The last button pressed wins; letting it go falls back to one still held.
+const held = [];   // chord indices, oldest first
+let sounding = -1;
+let CHORDS = [];
+function buildChords() {
+  CHORDS = S.chords.map(([r, q]) => ({ root: r, q, name: chordName(r, q), notes: E.plate(r, q) }));
+  const box = $('#chords'); box.innerHTML = '';
+  CHORDS.forEach((c, i) => {
+    const b = document.createElement('button'); b.className = 'chord'; b.dataset.i = i;
+    b.innerHTML = `${c.name}<small>${i + 1}</small>`;
+    b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(i); });
+    const up = () => release(i);
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+    b.addEventListener('contextmenu', e => e.preventDefault());
+    box.appendChild(b);
+  });
+  held.length = 0; chordChanged();
+}
+function press(i) { const k = held.indexOf(i); if (k >= 0) held.splice(k, 1); held.push(i); chordChanged(); }
+function release(i) { const k = held.indexOf(i); if (k >= 0) { held.splice(k, 1); chordChanged(); } }
+const currentChord = () => held.length ? CHORDS[held[held.length - 1]] : null;
+function chordChanged() {
+  const top = held.length ? held[held.length - 1] : -1;
+  document.querySelectorAll('.chord').forEach(b => b.classList.toggle('on', +b.dataset.i === top));
+  if (top === sounding) return;
+  sounding = top;
+  if (top < 0) post({ t: 'chordOff' });
+  else post({ t: 'chord', root: CHORDS[top].root, quality: CHORDS[top].q });
+}
+const keyHeld = new Set();
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= CHORDS.length && !keyHeld.has(e.key)) { keyHeld.add(e.key); press(n - 1); }
+  if (e.key === 'ArrowLeft') { keys.tilt = -1; e.preventDefault(); }
+  if (e.key === 'ArrowRight') { keys.tilt = 1; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  const n = parseInt(e.key, 10);
+  if (keyHeld.has(e.key)) { keyHeld.delete(e.key); release(n - 1); }
+  if ((e.key === 'ArrowLeft' && keys.tilt < 0) || (e.key === 'ArrowRight' && keys.tilt > 0)) keys.tilt = 0;
+});
+window.addEventListener('blur', () => { held.length = 0; keyHeld.clear(); keys.tilt = 0; chordChanged(); });
+
+/* ---------- sound ---------- */
+let ctx = null, node = null, mainEngine = null;
+function post(c) {
+  if (node && node.port) node.port.postMessage(c);
+  else if (mainEngine) mainEngine.command(c);
+}
+function impulse(ctx, seconds) {
+  const len = Math.floor(ctx.sampleRate * seconds), pre = Math.floor(ctx.sampleRate * 0.03);
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch); let lp = 0;
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / ctx.sampleRate;
+      lp += (0.35 + 0.5 * Math.exp(-t * 2)) * ((Math.random() * 2 - 1) - lp);
+      d[i] = lp * Math.exp(-t * 2.2);
+    }
+  }
+  return ir;
+}
+async function startAudio() {
+  if (ctx) { if (ctx.state !== 'running') await ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { toast('This browser has no Web Audio, so it stays silent.', 3000); return; }
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  ctx = new AC({ latencyHint: 'interactive' });
+  const voices = MOBILE ? 32 : 48;
+  let source = null;
+  if (ctx.audioWorklet) {
+    try {
+      const code = 'const TouchGrassEngine = ' + TouchGrassEngine.toString() + ';\n(' + TouchGrassProcessor.toString() + ')(TouchGrassEngine());';
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      node = new AudioWorkletNode(ctx, 'grass-engine', { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { voices } });
+      source = node;
+    } catch (e) { node = null; }
+  }
+  if (!source) {
+    mainEngine = new E.GrassEngine(ctx.sampleRate, voices);
+    const sp = ctx.createScriptProcessor(1024, 0, 2);
+    sp.onaudioprocess = ev => mainEngine.render(ev.outputBuffer.getChannelData(0), ev.outputBuffer.getChannelData(1), 1024);
+    source = sp;
+  }
+  const master = ctx.createGain(), dry = ctx.createGain(), wet = ctx.createGain(), rev = ctx.createConvolver();
+  dry.gain.value = 0.9; wet.gain.value = 0.28; rev.buffer = impulse(ctx, 3.0);
+  source.connect(dry).connect(master);
+  source.connect(rev).connect(wet).connect(master);
+  master.connect(ctx.destination);
+  if (ctx.state !== 'running') await ctx.resume();
+  sendSound();
+  post({ t: 'tone', v: 1 });
+  sounding = -2; chordChanged();
+}
+function sendSound() {
+  post({ t: 'voice', v: S.voice });
+  post({ t: 'ring', v: S.ring });
+  post({ t: 'drone', v: S.pad });
+  post({ t: 'droneBright', v: 0.42 });
+  post({ t: 'master', v: S.volume });
+}
+document.addEventListener('visibilitychange', () => {
+  if (!ctx) return;
+  if (document.hidden) { post({ t: 'alloff' }); held.length = 0; sounding = -1; chordChanged(); ctx.suspend(); }
+  else { ctx.resume(); wake(); last = performance.now(); }
+});
+
+// the topmost water at x (sim metres), as a share of the tank's height,
+// read from the field drawn last frame (the same edge the shader draws)
+function surfaceAt(x) {
+  const F = sim.F, fnx = sim.fnx, fny = sim.fny, hf = sim.h / 2;
+  const fx = clamp(Math.floor(x / hf), 2, fnx - 3);
+  for (let fy = 2; fy < fny - 2; fy++) if (F[fy * fnx + fx] >= 0.45) return clamp(((fy + 0.5) * hf - sim.h) / (sim.innerY * sim.h), 0, 1);
+  return 1;
+}
+// the water's plucks -> notes on the held chord
+function playStrum(events, dt) {
+  const chord = currentChord();
+  for (const e of events) {
+    glow[e.string] = Math.max(glow[e.string], 0.35 + 0.65 * e.vel);
+    sparks.push({ k: e.string, y: surfaceAt(strum.x[e.string]), t: 0, v: e.vel });
+    if (!chord || !ctx) continue;
+    post({ t: 'pluckNote', note: chord.notes[e.string], vel: 0.9 * e.vel, delay: e.frac * dt, bright: 0.65 + 0.35 * e.vel });
+  }
+  if (sparks.length > 60) sparks.splice(0, sparks.length - 60);
+}
+
+/* ---------- settings sheet ---------- */
+const SLIDERS = [
+  { sec: 'Sound' },
+  { k: 'ring', label: 'Ring time', min: 0.5, max: 12, log: true, fmt: v => v.toFixed(1) + ' s', send: true },
+  { k: 'pad', label: 'Pad level', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'The steady chord you hear while a button is held.' },
+  { k: 'volume', label: 'Volume', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true },
+  { sec: 'Water' },
+  { k: 'size', label: 'Tank size', min: 0.15, max: 1.5, log: true, fmt: v => Math.round(v * 100) + ' cm', help: 'A small tank makes quick waves and fast strums; a big one slow swells.', resize: true },
+  { k: 'fill', label: 'Amount of water', min: 0.1, max: 0.6, fmt: v => Math.round(v * 100) + ' %', rebuild: true },
+  { k: 'sens', label: 'Sensitivity', min: 0.4, max: 3, log: true, fmt: v => v.toFixed(2) + '×', rebuild: true, help: 'How small a wave plucks a string.' },
+  { k: 'gravity', label: 'Tilt strength', min: 0.3, max: 2, fmt: v => v.toFixed(2) + ' g' },
+  { k: 'inertia', label: 'Shake', min: 0, max: 3, fmt: v => v.toFixed(2) + '×', help: 'How much moving the phone sloshes the water.' },
+];
+const inputs = {};
+const toPos = (d, v) => d.log ? Math.log(v / d.min) / Math.log(d.max / d.min) * 1000 : (v - d.min) / (d.max - d.min) * 1000;
+const fromPos = (d, p) => d.log ? d.min * Math.pow(d.max / d.min, p / 1000) : d.min + (d.max - d.min) * p / 1000;
+function seg(key, title, opts, parse) {
+  const ctl = $('#controls'), h = document.createElement('h3'); h.textContent = title; ctl.appendChild(h);
+  const box = document.createElement('div'); box.className = 'seg';
+  for (const [v, label] of Object.entries(opts)) {
+    const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
+    b.onclick = () => setVal(key, parse ? parse(v) : v); box.appendChild(b);
+  }
+  ctl.appendChild(box); inputs[key] = { seg: box };
+}
+let rebuildTimer = 0;
+function buildSheet() {
+  const ctl = $('#controls');
+  seg('voice', 'Strings', VOICE_NAMES, v => +v);
+  for (const d of SLIDERS) {
+    if (d.sec) { const h = document.createElement('h3'); h.textContent = d.sec; ctl.appendChild(h); continue; }
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label for="s_${d.k}">${d.label}</label><output></output><input type="range" id="s_${d.k}" min="0" max="1000" step="1">${d.help ? `<small>${d.help}</small>` : ''}`;
+    const inp = row.querySelector('input'), out = row.querySelector('output');
+    inp.oninput = () => setVal(d.k, fromPos(d, +inp.value));
+    ctl.appendChild(row); inputs[d.k] = { d, inp, out };
+  }
+  seg('invert', 'Tilt axes', { auto: 'Auto', no: 'Normal', yes: 'Inverted' });
+  syncSheet();
+}
+function syncSheet() {
+  for (const [k, el] of Object.entries(inputs)) {
+    if (el.seg) { for (const b of el.seg.children) b.classList.toggle('on', b.dataset.v === String(S[k])); continue; }
+    if (document.activeElement !== el.inp) el.inp.value = toPos(el.d, S[k]);
+    el.out.textContent = el.d.fmt(S[k]);
+  }
+}
+function setVal(k, v) {
+  S[k] = v; save(); syncSheet();
+  const d = SLIDERS.find(x => x.k === k);
+  if (k === 'voice' || (d && d.send)) sendSound();
+  if (d && d.resize) sim.setWidth(v);
+  if (d && d.rebuild) { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuild, 150); }
+}
+let toastT = 0;
+function toast(msg, ms = 1800) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
+$('#btnSheet').onclick = () => $('#sheet').classList.toggle('open');
+$('#btnClose').onclick = () => $('#sheet').classList.remove('open');
+$('#btnReset').onclick = () => { rebuild(); toast('Water reset'); };
+$('#btnDefaults').onclick = () => { const ch = S.chords; S = JSON.parse(JSON.stringify(DEFAULTS)); S.chords = ch; save(); rebuild(); syncSheet(); sendSound(); toast('Defaults'); };
+$('#btnFull').onclick = async () => {
+  try {
+    if (!document.fullscreenElement) { await document.documentElement.requestFullscreen(); try { await screen.orientation.lock('landscape'); } catch (e) {} }
+    else await document.exitFullscreen();
+  } catch (e) { toast('Full screen is not supported here. On an iPhone: Share → Add to Home Screen.', 3200); }
+};
+
+/* ---------- start: sound and motion both need a tap ---------- */
+async function askMotion() {
+  if (!window.isSecureContext) { if (MOBILE) toast('Tilt needs https. Open the https address.', 3500); return; }
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const r = await DeviceMotionEvent.requestPermission();
+      if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) { try { await DeviceOrientationEvent.requestPermission(); } catch (e) {} }
+      if (r !== 'granted') toast('Motion access was denied. Close the tab and open the page again to be asked again.', 3500);
+    } catch (e) { toast('Could not ask for motion access: ' + e.message, 3000); }
+  }
+}
+$('#btnStart').onclick = async () => {
+  $('#start').hidden = true;
+  await Promise.all([startAudio(), askMotion()]);
+  wake();
+};
+$('#btnSensor').onclick = async () => { await askMotion(); setTimeout(() => { if (!sensorAlive()) toast('No motion data is coming. This device may have no sensor; use the arrow keys.', 3000); }, 1200); };
+function sensorChip(live) {
+  const b = $('#btnSensor'), label = b.querySelector('span:last-child');
+  b.classList.toggle('live', live); b.classList.remove('warn');
+  if (live) label.textContent = 'Tilt';
+  else if (MOBILE && !window.isSecureContext) { b.classList.add('warn'); label.textContent = 'Needs https'; }
+  else if (MOBILE) { b.classList.add('warn'); label.textContent = 'Tap for tilt'; }
+  else label.textContent = 'Arrow keys';
+}
+let wakeLock = null;
+async function wake() { try { if (!wakeLock && navigator.wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch (e) {} }
+
+async function showPhoneLink() {
+  if (MOBILE) return;
+  try {
+    let urls = null;
+    try { const r = await fetch('lan.json', { cache: 'no-store' }); if (r.ok) urls = (await r.json()).urls; } catch (e) {}
+    if ((!urls || !urls.length) && location.protocol === 'https:') urls = [location.href.split('#')[0]];
+    if (!urls || !urls.length) return;
+    const box = $('#qr'); box.innerHTML = '';
+    const holder = document.createElement('div'); box.appendChild(holder);
+    const code = document.createElement('code'); code.textContent = urls[0]; box.appendChild(code);
+    $('#qrbox').hidden = false;
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    s.onload = () => { try { new QRCode(holder, { text: urls[0], width: 104, height: 104 }); } catch (e) {} };
+    document.head.appendChild(s);
+  } catch (e) {}
+}
+
+/* ---------- loop ---------- */
+let last = performance.now(), fpsS = 60, simS = 0, frameN = 0;
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 1 / 240, 1 / 30); last = now;
+  step(dt);
+  requestAnimationFrame(frame);
+}
+function step(dt) {
+  const live = updateGravity(dt);
+  updateFinger(dt);
+  const t0 = performance.now();
+  sim.step(dt);
+  playStrum(strum.update(sim, dt), dt);
+  sim.computeField();
+  simS += (performance.now() - t0 - simS) * 0.05; fpsS += (1 / dt - fpsS) * 0.05;
+  drawWater();
+  drawStrings(dt);
+  if ((frameN++ & 15) === 0) {
+    sensorChip(live);
+    if ($('#sheet').classList.contains('open'))
+      $('#stats').textContent = `${fpsS.toFixed(0)} fps · water ${simS.toFixed(1)} ms\n${sim.numP} particles · ${sim.innerX}×${sim.innerY} cells`;
+  }
+}
+
+/* ---------- boot ---------- */
+initGL();
+layout();
+buildChords();
+buildSheet();
+window.addEventListener('resize', layout);
+window.addEventListener('orientationchange', () => setTimeout(layout, 200));
+showPhoneLink();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
