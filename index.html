@@ -137,19 +137,23 @@ const STRINGS = 13;
 /* ---------- settings ---------- */
 const DEFAULTS = {
   voice: 1, ring: 3.5, pad: 0.35, volume: 0.9,
+  pluck: 1, bow: 0.3, bell: 0.5, bowMode: 0, depthColor: 0.6,   // the layers
   size: 0.35, fill: 0.3, flip: 0.9, damping: 0.05, sens: 1, gravity: 1, inertia: 1, invert: 'auto', preset: 'Water',
   span: 2, register: -12,   // octave zones above the water line; the base octave relative to the chord's plate
   chords: [[0, 0], [7, 0], [9, 1], [5, 0], [2, 1], [4, 1]],   // C G Am F Dm Em
 };
 let S = JSON.parse(JSON.stringify(DEFAULTS));
 try { Object.assign(S, JSON.parse(localStorage.getItem('waterharp.settings') || '{}')); } catch (e) {}
+if (S.voice === 4 || S.voice === 5) S.voice = 1;   // the cello and the ney were removed
 const save = () => { try { localStorage.setItem('waterharp.settings', JSON.stringify(S)); } catch (e) {} };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const KIND = ['', 'm', '7', 'maj7', 'm7'];
 const chordName = (r, q) => NOTE_NAMES[r] + KIND[q];
 const noteName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
-const VOICE_NAMES = { 1: 'Harp', 0: 'Omni', 2: 'Vibes', 3: 'Guitar', 4: 'Cello', 5: 'Ney', 6: 'Juno' };
+// engine voice index -> name, in the order shown (4 and 5, Touch Grass's
+// cello and ney, are left out); an array, since an object would sort the numbers
+const VOICE_NAMES = [[1, 'Harp'], [0, 'Omni'], [2, 'Vibes'], [3, 'Guitar'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, 'Juno Strings'], [9, 'Juno Bass'], [10, 'Acid 303']];
 
 /* ---------- stage: always landscape ---------- */
 let view = { vw: 1, vh: 1, dpr: 1, rot: 0, SW: 1, SH: 1 };
@@ -282,6 +286,21 @@ function drawStrings(dt) {
     oc.strokeStyle = `rgba(${Math.round(lerp(140, 235, g))},${Math.round(lerp(185, 250, g))},255,${(base + 0.75 * g).toFixed(3)})`;
     oc.lineWidth = (1 + 2.5 * g) * d;
     oc.beginPath(); oc.moveTo(x, 0); oc.lineTo(x, H); oc.stroke();
+    // a string that the flow is bowing shimmers along its wet part
+    const fl = S.bow > 0 ? flowLevel[k] : 0;
+    if (fl > 0.02) {
+      const top = (1 - strum.depth[k]) * H, wob = Math.sin(performance.now() / 70 + k) * 1.2 * d * fl;
+      oc.strokeStyle = `rgba(150,255,235,${(0.15 + 0.45 * fl).toFixed(3)})`; oc.lineWidth = (2 + 4 * fl) * d;
+      oc.beginPath(); oc.moveTo(x + wob, Math.max(0, top)); oc.lineTo(x - wob, H); oc.stroke();
+    }
+  }
+  // droplets crossing strings: a quick white fleck
+  for (let i = flecks.length - 1; i >= 0; i--) {
+    const f = flecks[i]; f.t += dt;
+    if (f.t > 0.25) { flecks.splice(i, 1); continue; }
+    const a = 1 - f.t / 0.25;
+    oc.fillStyle = `rgba(255,255,255,${(0.9 * a).toFixed(3)})`;
+    oc.beginPath(); oc.arc((f.k + 0.5) / STRINGS * W, (1 - f.y) * H, (1.5 + 3 * a) * d, 0, Math.PI * 2); oc.fill();
   }
   // the octave zones: faint lines across the strings above the water line
   oc.setLineDash([3 * d, 6 * d]);
@@ -500,6 +519,8 @@ function sendSound() {
   post({ t: 'drone', v: S.pad });
   post({ t: 'droneBright', v: 0.42 });
   post({ t: 'master', v: S.volume });
+  post({ t: 'bowMode', v: S.bowMode });
+  post({ t: 'layers', bow: S.bow, bell: S.bell });
 }
 document.addEventListener('visibilitychange', () => {
   if (!ctx) return;
@@ -524,16 +545,58 @@ function noteFor(chord, k, octave) {
   while (n < 40) n += 12;
   return n;
 }
+const smooth01 = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+// depth colours the tone: the deeper the water on a string, the darker it sounds
+const depthDark = d => 1 - S.depthColor * 0.5 * smooth01(0.15, 0.8, d);
 // the water's plucks -> notes on the held chord
 function playStrum(events, dt) {
   const chord = currentChord();
   for (const e of events) {
     glow[e.string] = Math.max(glow[e.string], 0.35 + 0.65 * e.vel);
     sparks.push({ k: e.string, y: surfaceAt(strum.x[e.string]), t: 0, v: e.vel, o: e.octave });
-    if (!chord || !ctx) continue;
-    post({ t: 'pluckNote', note: noteFor(chord, e.string, e.octave), vel: 0.9 * e.vel, delay: e.frac * dt, bright: 0.65 + 0.35 * e.vel });
+    if (!chord || !ctx || S.pluck <= 0) continue;
+    post({ t: 'pluckNote', note: noteFor(chord, e.string, e.octave), vel: 0.9 * e.vel * S.pluck, delay: e.frac * dt,
+           bright: (0.65 + 0.35 * e.vel) * depthDark(e.depth) });
   }
-  if (sparks.length > 60) sparks.splice(0, sparks.length - 60);
+  if (sparks.length > 80) sparks.splice(0, sparks.length - 80);
+}
+
+// flowing water sings: one level per string, from the flow across it
+const FLOW_QUIET = 0.06, FLOW_FULL = 0.5;   // tank widths a second x depth (test/flowtest.js)
+const flowLevel = new Float32Array(STRINGS), bowNotes = new Array(STRINGS).fill(-1), bowBright = new Array(STRINGS).fill(1);
+let bowSilent = true;
+function playFlow() {
+  const chord = currentChord();
+  let any = false;
+  for (let k = 0; k < STRINGS; k++) {
+    const f = strum.flow[k];
+    flowLevel[k] = chord && f > FLOW_QUIET ? clamp(Math.log(f / FLOW_QUIET) / Math.log(FLOW_FULL / FLOW_QUIET), 0, 1) : 0;
+    if (flowLevel[k] > 0) any = true;
+    if (chord) bowNotes[k] = noteFor(chord, k, 0);
+    bowBright[k] = depthDark(strum.depth[k]);
+  }
+  if (!ctx || (!any && bowSilent)) return;   // nothing to say twice
+  bowSilent = !any;
+  post({ t: 'bow', lv: Array.from(flowLevel), nt: bowNotes, br: bowBright });
+}
+
+// splashes ring: a bell an octave over the string a loose droplet flies across,
+// at most about ten a second, so a wild slosh glitters and does not clatter
+const bellBucket = { tokens: 4, rate: 10, max: 4 };
+const flecks = [];   // {x, y, t}
+function playDrops(drops, dt) {
+  bellBucket.tokens = Math.min(bellBucket.max, bellBucket.tokens + dt * bellBucket.rate);
+  const chord = currentChord();
+  for (const d of drops) {
+    flecks.push({ k: d.string, y: d.y, t: 0 });
+    if (!chord || !ctx || S.bell <= 0 || bellBucket.tokens < 1) continue;
+    bellBucket.tokens -= 1;
+    let n = noteFor(chord, d.string, 0) + 12;
+    while (n < 72) n += 12;
+    while (n > 103) n -= 12;
+    post({ t: 'bell', note: n, vel: clamp(0.3 + 0.35 * d.speed, 0.3, 1), delay: d.frac * dt });
+  }
+  if (flecks.length > 40) flecks.splice(0, flecks.length - 40);
 }
 
 /* ---------- settings sheet ---------- */
@@ -542,6 +605,11 @@ const SLIDERS = [
   { k: 'ring', label: 'Ring time', min: 0.5, max: 12, log: true, fmt: v => v.toFixed(1) + ' s', send: true },
   { k: 'pad', label: 'Pad level', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'The steady chord you hear while a button is held.' },
   { k: 'volume', label: 'Volume', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true },
+  { sec: 'Layers' },
+  { k: 'pluck', label: 'Plucks', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', help: 'Waves running onto a string.' },
+  { k: 'bow', label: 'Flow', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'Water flowing across a string makes it sing, as loud as the flow.' },
+  { k: 'bell', label: 'Splash bells', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'Droplets flying across a string ring a bell an octave up.' },
+  { k: 'depthColor', label: 'Depth colour', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', help: 'Deep water on a string darkens its tone.' },
   { sec: 'Water' },
   { k: 'size', label: 'Tank size', min: 0.15, max: 1.5, log: true, fmt: v => Math.round(v * 100) + ' cm', help: 'A small tank makes quick waves and fast strums; a big one slow swells.', resize: true },
   { k: 'fill', label: 'Amount of water', min: 0.1, max: 0.6, fmt: v => Math.round(v * 100) + ' %', rebuild: true },
@@ -557,7 +625,7 @@ const fromPos = (d, p) => d.log ? d.min * Math.pow(d.max / d.min, p / 1000) : d.
 function seg(key, title, opts, parse) {
   const ctl = $('#controls'), h = document.createElement('h3'); h.textContent = title; ctl.appendChild(h);
   const box = document.createElement('div'); box.className = 'seg';
-  for (const [v, label] of Object.entries(opts)) {
+  for (const [v, label] of Array.isArray(opts) ? opts : Object.entries(opts)) {
     const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
     b.onclick = () => setVal(key, parse ? parse(v) : v); box.appendChild(b);
   }
@@ -569,6 +637,7 @@ function buildSheet() {
   seg('preset', 'Water', Object.fromEntries(Object.keys(WaterPresets).map(n => [n, n])));
   const pnote = document.createElement('p'); pnote.className = 'note'; pnote.id = 'presetNote'; ctl.appendChild(pnote);
   seg('voice', 'Strings', VOICE_NAMES, v => +v);
+  seg('bowMode', 'Flow voice', { 0: 'Glass', 1: 'Juno pad' }, v => +v);
   seg('span', 'Octaves by height', { 0: 'Off', 1: '1', 2: '2', 3: '3' }, v => +v);
   const onote = document.createElement('p'); onote.className = 'note';
   onote.textContent = 'The higher the water climbs a string, the higher it sounds: each dashed line is an octave up.'; ctl.appendChild(onote);
@@ -601,7 +670,7 @@ function setVal(k, v) {
   if (PRESET_KEYS.includes(k)) S.preset = '';
   save(); syncSheet();
   const d = SLIDERS.find(x => x.k === k);
-  if (k === 'voice' || (d && d.send)) sendSound();
+  if (k === 'voice' || k === 'bowMode' || (d && d.send)) sendSound();
   if (d && d.resize) sim.setWidth(v);
   if (d && d.param) Object.assign(sim.params, { flipRatio: S.flip, damping: S.damping });
   if (k === 'span') strum.p.span = v;
@@ -694,6 +763,8 @@ function step(dt) {
   const t0 = performance.now();
   sim.step(dt);
   playStrum(strum.update(sim, dt), dt);
+  playDrops(strum.drops, dt);
+  playFlow();
   sim.computeField();
   simS += (performance.now() - t0 - simS) * 0.05; fpsS += (1 / dt - fpsS) * 0.05;
   drawWater();
