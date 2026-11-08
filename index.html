@@ -40,8 +40,9 @@ button { font: inherit; color: inherit; }
 #tank { position: absolute; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #06090d; }
 #tank canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 #ov { pointer-events: none; }
-#right { position: absolute; display: flex; flex-direction: column; gap: 8px; }
-#tools { display: flex; gap: 6px; flex-wrap: wrap; }
+#right { position: absolute; display: flex; flex-direction: column; gap: 6px; }
+#tools { display: flex; gap: 5px; flex-wrap: nowrap; }
+#tools .pill { flex: 1 1 auto; padding: 6px 7px; font-size: 12px; text-align: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pill { border: 1px solid var(--line); background: rgba(20, 32, 46, 0.72); border-radius: 999px; padding: 8px 12px; cursor: pointer; white-space: nowrap; font-size: 13px; }
 .pill:active { transform: scale(0.97); }
 .pill.on { border-color: var(--accent); color: var(--accent); }
@@ -49,8 +50,19 @@ button { font: inherit; color: inherit; }
 #btnSensor.live .dot { background: #5fe08a; box-shadow: 0 0 6px #5fe08a; }
 #btnSensor.warn { border-color: var(--warn); color: var(--warn); }
 #btnSensor.warn .dot { background: var(--warn); }
-#fx { flex: 1; min-height: 0; border: 1px dashed var(--line); border-radius: 14px; display: flex; align-items: center; justify-content: center;
-  text-align: center; color: var(--dim); font-size: 12px; padding: 12px; }
+/* the effects pad: page tabs, the page's small choices, the XY square, the tempo */
+#fx { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 5px; }
+.tabs, .chips, #tempo { display: flex; gap: 4px; }
+.tabs button, .chips button, #tempo button { flex: 1 1 0; min-width: 0; border: 1px solid var(--line); background: rgba(20, 32, 46, 0.72);
+  border-radius: 9px; padding: 6px 2px; font-size: 12px; cursor: pointer; touch-action: none; position: relative; overflow: hidden; }
+.chips button { padding: 4px 1px; font-size: 11px; border-radius: 7px; }
+.tabs button.on, .chips button.on { border-color: var(--accent); color: var(--accent); background: rgba(79, 195, 255, 0.12); }
+.chips button.live::after { content: ""; position: absolute; left: 20%; right: 20%; bottom: 1px; height: 2px; border-radius: 1px; background: #8ff0d8; }
+#tempo #btnTap { flex: 2.4 1 0; font: 12px var(--mono); }
+#tempo #btnTap.beat { background: rgba(79, 195, 255, 0.28); }
+#pad { flex: 1; min-height: 60px; position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; touch-action: none;
+  background: radial-gradient(circle at 50% 50%, rgba(30, 60, 90, 0.35), rgba(8, 12, 18, 0.6)); }
+#padc { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
 
 #sheet { position: absolute; top: 0; right: 0; height: 100%; width: min(360px, 70%); overflow-y: auto; -webkit-overflow-scrolling: touch;
   background: var(--panel); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-left: 1px solid var(--line);
@@ -97,7 +109,12 @@ h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12
       <button class="pill" id="btnPreset" title="Next water preset">Water</button>
       <button class="pill" id="btnSheet">Settings</button>
     </div>
-    <div id="fx">Effects pad<br>filter · space · modulation<br><br>coming in step 3</div>
+    <div id="fx">
+      <div class="tabs" id="fxTabs"><button data-page="filter">Filter</button><button data-page="space">Space</button><button data-page="mod">Mod</button></div>
+      <div class="chips" id="fxChips"></div>
+      <div id="pad" aria-label="Effects pad: drag to play the effect, double-tap to reset it"><canvas id="padc"></canvas></div>
+      <div id="tempo"><button id="bpmDown" aria-label="Slower">−</button><button id="btnTap" title="Tap the tempo">96 BPM</button><button id="bpmUp" aria-label="Faster">+</button></div>
+    </div>
   </div>
   <aside id="sheet" aria-label="Settings">
     <div class="phead"><b>WaterHarp</b><button id="btnClose">Close</button></div>
@@ -141,10 +158,15 @@ const DEFAULTS = {
   size: 0.35, fill: 0.3, flip: 0.9, damping: 0.05, sens: 1, gravity: 1, inertia: 1, invert: 'auto', preset: 'Water',
   span: 2, register: -12,   // octave zones above the water line; the base octave relative to the chord's plate
   chords: [[0, 0], [7, 0], [9, 1], [5, 0], [2, 1], [4, 1]],   // C G Am F Dm Em
+  // the effects pad: the page shown, the Mod page's chosen effect, tempo, echo
+  // division, and where each effect's point sits ([x, y], y up)
+  fx: { page: 'filter', mode: 'lfo', bpm: 96, div: 1,
+        pts: { filter: [1, 0.12], space: [0.44, 0.35], lfo: [0.6, 0], gate: [0.66, 0], trem: [0.8, 0], pan: [0.4, 0], chorus: [0.3, 0] } },
 };
 let S = JSON.parse(JSON.stringify(DEFAULTS));
 try { Object.assign(S, JSON.parse(localStorage.getItem('waterharp.settings') || '{}')); } catch (e) {}
 if (S.voice === 4 || S.voice === 5) S.voice = 1;   // the cello and the ney were removed
+S.fx = Object.assign({}, DEFAULTS.fx, S.fx); S.fx.pts = Object.assign({}, DEFAULTS.fx.pts, S.fx.pts);
 const save = () => { try { localStorage.setItem('waterharp.settings', JSON.stringify(S)); } catch (e) {} };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -402,7 +424,7 @@ function toSim(e) {
 }
 cv.addEventListener('pointerdown', e => {
   if (ptr.down) return;
-  ptr.down = true; ptr.id = e.pointerId; cv.setPointerCapture(e.pointerId);
+  ptr.down = true; ptr.id = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   [ptr.x, ptr.y] = toSim(e); ptr.px = ptr.x; ptr.py = ptr.y;
 });
 cv.addEventListener('pointermove', e => { if (ptr.down && e.pointerId === ptr.id) [ptr.x, ptr.y] = toSim(e); });
@@ -427,7 +449,7 @@ function buildChords() {
   CHORDS.forEach((c, i) => {
     const b = document.createElement('button'); b.className = 'chord'; b.dataset.i = i;
     b.innerHTML = `${c.name}<small>${i + 1}</small>`;
-    b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(i); });
+    b.addEventListener('pointerdown', e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch (err) {} press(i); });
     const up = () => release(i);
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     b.addEventListener('contextmenu', e => e.preventDefault());
@@ -462,7 +484,7 @@ window.addEventListener('keyup', e => {
 window.addEventListener('blur', () => { held.length = 0; keyHeld.clear(); keys.tilt = 0; chordChanged(); });
 
 /* ---------- sound ---------- */
-let ctx = null, node = null, mainEngine = null;
+let ctx = null, node = null, mainEngine = null, wetGain = null;
 function post(c) {
   if (node && node.port) node.port.postMessage(c);
   else if (mainEngine) mainEngine.command(c);
@@ -494,6 +516,7 @@ async function startAudio() {
       const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
       await ctx.audioWorklet.addModule(url);
       node = new AudioWorkletNode(ctx, 'grass-engine', { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { voices } });
+      node.port.onmessage = e => { const m = e.data; if (m && m.beat != null) Object.assign(clock, { beat: m.beat, bpm: m.bpm, time: m.time, at: performance.now() }); };
       source = node;
     } catch (e) { node = null; }
   }
@@ -504,12 +527,14 @@ async function startAudio() {
     source = sp;
   }
   const master = ctx.createGain(), dry = ctx.createGain(), wet = ctx.createGain(), rev = ctx.createConvolver();
-  dry.gain.value = 0.9; wet.gain.value = 0.28; rev.buffer = impulse(ctx, 3.0);
+  dry.gain.value = 0.9; wet.gain.value = 0.8 * S.fx.pts.space[1]; rev.buffer = impulse(ctx, 3.0);
+  wetGain = wet;
   source.connect(dry).connect(master);
   source.connect(rev).connect(wet).connect(master);
   master.connect(ctx.destination);
   if (ctx.state !== 'running') await ctx.resume();
   sendSound();
+  sendFx();
   post({ t: 'tone', v: 1 });
   sounding = -2; chordChanged();
 }
@@ -597,6 +622,159 @@ function playDrops(drops, dt) {
     post({ t: 'bell', note: n, vel: clamp(0.3 + 0.35 * d.speed, 0.3, 1), delay: d.frac * dt });
   }
   if (flecks.length > 40) flecks.splice(0, flecks.length - 40);
+}
+
+/* ---------- the effects pad ---------- */
+// Three pages. Filter: X cutoff, Y resonance. Space: X echo, Y reverb.
+// Mod: one of five effects, X its rate (locked to the tempo; the chorus in
+// Hz), Y its depth. Every effect keeps its own point, so several modulations
+// can run at once: set one, pick the next. Double-tap resets the one shown.
+const SYNC_NAMES = ['2 bars', '1 bar', '1/2', '1/4', '1/8', '1/16'], GATE_NAMES = ['1/4', '1/8', '1/16', '1/32'];
+const DIV_NAMES = ['1/8', '1/8.', '1/4'];
+const MODS = [['lfo', 'LFO'], ['gate', 'Gate'], ['trem', 'Trem'], ['pan', 'Pan'], ['chorus', 'Chorus']];
+const NEUTRAL = { filter: [1, 0.12], space: [0.44, 0.35], lfo: [0.6, 0], gate: [0.66, 0], trem: [0.8, 0], pan: [0.4, 0], chorus: [0.3, 0] };
+const idx = (x, n) => Math.round(clamp(x, 0, 1) * (n - 1));
+const choHz = x => 0.1 * Math.pow(80, clamp(x, 0, 1));          // 0.1 .. 8 Hz
+const pct = v => Math.round(v * 100) + '%';
+// what the shown point means, in words, for the pad's corner
+function padText(key) {
+  const [x, y] = S.fx.pts[key];
+  switch (key) {
+    case 'filter': return [`cutoff ${Math.round(60 * Math.pow(2, x * 8.2))} Hz`, `resonance ${pct(y)}`];
+    case 'space': return [`echo ${pct(x)}`, `reverb ${pct(y)}`];
+    case 'gate': return [`gate ${GATE_NAMES[idx(x, 4)]}`, `depth ${pct(y)}`];
+    case 'chorus': return [`${choHz(x).toFixed(1)} Hz`, y > 0.5 ? `vibrato ${pct(y)}` : `chorus ${pct(y)}`];
+    default: return [`rate ${SYNC_NAMES[idx(x, 6)]}`, `depth ${pct(y)}`];
+  }
+}
+const padKey = () => S.fx.page === 'mod' ? S.fx.mode : S.fx.page;
+function sendFx() {
+  const P = S.fx.pts;
+  post({ t: 'fx', bpm: S.fx.bpm, cut: P.filter[0], res: P.filter[1] * 0.95,
+    lfoRate: idx(P.lfo[0], 6), lfoDepth: P.lfo[1], gateRate: idx(P.gate[0], 4), gateDepth: P.gate[1],
+    tremRate: idx(P.trem[0], 6), tremDepth: P.trem[1], panRate: idx(P.pan[0], 6), panDepth: P.pan[1],
+    choRate: choHz(P.chorus[0]), choDepth: P.chorus[1] });
+  post({ t: 'space', send: 0.55 * P.space[0], fb: 0.2 + 0.55 * P.space[0], div: S.fx.div });
+  if (wetGain && ctx && ctx.currentTime != null) wetGain.gain.setTargetAtTime(0.8 * P.space[1], ctx.currentTime, 0.03);
+}
+let fxSaveTimer = 0;
+function setPoint(key, x, y) {
+  S.fx.pts[key] = [clamp(x, 0, 1), clamp(y, 0, 1)];
+  sendFx();
+  clearTimeout(fxSaveTimer); fxSaveTimer = setTimeout(save, 400);   // not on every move
+}
+function buildFx() {
+  for (const b of $('#fxTabs').children) b.onclick = () => { S.fx.page = b.dataset.page; save(); syncFx(); };
+  syncFx();
+}
+function syncFx() {
+  for (const b of $('#fxTabs').children) b.classList.toggle('on', b.dataset.page === S.fx.page);
+  const box = $('#fxChips'); box.innerHTML = '';
+  const opts = S.fx.page === 'mod' ? MODS : S.fx.page === 'space' ? DIV_NAMES.map((n, i) => [String(i), n]) : [];
+  box.hidden = !opts.length;
+  for (const [v, label] of opts) {
+    const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
+    b.onclick = () => {
+      if (S.fx.page === 'mod') S.fx.mode = v; else { S.fx.div = +v; sendFx(); }
+      save(); syncFx();
+    };
+    box.appendChild(b);
+  }
+  syncChips();
+  $('#btnTap').textContent = `${Math.round(S.fx.bpm)} BPM`;
+}
+function syncChips() {
+  for (const b of $('#fxChips').children) {
+    const on = S.fx.page === 'mod' ? b.dataset.v === S.fx.mode : +b.dataset.v === S.fx.div;
+    b.classList.toggle('on', on);
+    b.classList.toggle('live', S.fx.page === 'mod' && S.fx.pts[b.dataset.v][1] > 0.02);
+  }
+}
+// pointer on the pad, in its own 0..1 square (y up), through the turned stage
+const padEl = $('#pad'), padCv = $('#padc'), pc = padCv.getContext('2d');
+function stageOffset(el) { let x = 0, y = 0; for (let e = el; e && e !== stage; e = e.offsetParent) { x += e.offsetLeft; y += e.offsetTop; } return [x, y]; }
+const PAD_M = 12;
+function padXY(e) {
+  const [sx, sy] = toStage(e.clientX, e.clientY), [ox, oy] = stageOffset(padEl);
+  // the point's range is inset by PAD_M, so the dot stays whole at the edges
+  return [(sx - ox - PAD_M) / (padEl.offsetWidth - 2 * PAD_M), 1 - (sy - oy - PAD_M) / (padEl.offsetHeight - 2 * PAD_M)];
+}
+let padPtr = null, lastPadTap = 0;
+padEl.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const now = performance.now();
+  if (now - lastPadTap < 300) {                     // double-tap: back to neutral
+    const k = padKey(); setPoint(k, NEUTRAL[k][0], NEUTRAL[k][1]); syncChips(); lastPadTap = 0; return;
+  }
+  lastPadTap = now;
+  padPtr = e.pointerId; try { padEl.setPointerCapture(e.pointerId); } catch (err) {}
+  const [x, y] = padXY(e); setPoint(padKey(), x, y); syncChips();
+});
+padEl.addEventListener('pointermove', e => { if (e.pointerId !== padPtr) return; const [x, y] = padXY(e); setPoint(padKey(), x, y); syncChips(); });
+const padUp = e => { if (e.pointerId === padPtr) padPtr = null; };
+padEl.addEventListener('pointerup', padUp); padEl.addEventListener('pointercancel', padUp);
+
+// tempo: tap it, or step it
+const taps = [];
+$('#btnTap').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const t = performance.now() / 1000;
+  if (taps.length && t - taps[taps.length - 1] > 2) taps.length = 0;
+  taps.push(t); if (taps.length > 5) taps.shift();
+  if (taps.length >= 2) {
+    const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+    setBpm(60 / avg);
+  }
+});
+function setBpm(b) { S.fx.bpm = clamp(Math.round(b), 40, 240); save(); sendFx(); syncFx(); }
+$('#bpmDown').onclick = () => setBpm(S.fx.bpm - 1);
+$('#bpmUp').onclick = () => setBpm(S.fx.bpm + 1);
+
+// the beat, as the sound engine counts it (it reports about ten times a second)
+const clock = { beat: 0, time: 0, bpm: 96, at: 0 };
+function beatNow() {
+  if (mainEngine) return mainEngine.fx.beat;
+  if (!ctx || !clock.at) return performance.now() / 1000 * S.fx.bpm / 60;
+  return clock.beat + (ctx.currentTime - clock.time) * clock.bpm / 60;
+}
+let lastBeatInt = -1;
+function drawPad() {
+  const d = view.dpr, w = Math.round(padEl.offsetWidth * d), h = Math.round(padEl.offsetHeight * d);
+  if (!w || !h) return;
+  if (padCv.width !== w || padCv.height !== h) { padCv.width = w; padCv.height = h; }
+  pc.clearRect(0, 0, w, h);
+  const key = padKey(), [x, y] = S.fx.pts[key], beat = beatNow();
+  const m = PAD_M * d;
+  // grid: quarters, and for tempo-locked rates a tick per step along X
+  pc.strokeStyle = 'rgba(150,190,220,0.10)'; pc.lineWidth = d;
+  for (let i = 1; i < 4; i++) {
+    pc.beginPath(); pc.moveTo(w * i / 4, 0); pc.lineTo(w * i / 4, h); pc.stroke();
+    pc.beginPath(); pc.moveTo(0, h * i / 4); pc.lineTo(w, h * i / 4); pc.stroke();
+  }
+  // the other Mod effects that are running, as faint dots
+  if (S.fx.page === 'mod') for (const [k] of MODS) {
+    if (k === key || S.fx.pts[k][1] <= 0.02) continue;
+    pc.fillStyle = 'rgba(143,240,216,0.35)';
+    pc.beginPath(); pc.arc(m + S.fx.pts[k][0] * (w - 2 * m), m + (1 - S.fx.pts[k][1]) * (h - 2 * m), 4 * d, 0, Math.PI * 2); pc.fill();
+  }
+  // the point, pulsing with its modulation
+  let pulse = 0;
+  if (key === 'lfo' || key === 'trem' || key === 'pan') pulse = 0.5 + 0.5 * Math.sin(2 * Math.PI * beat / [8, 4, 2, 1, 0.5, 0.25][idx(x, 6)]);
+  if (key === 'gate') pulse = ((beat / [1, 0.5, 0.25, 0.125][idx(x, 4)]) % 1) < 0.5 ? 1 : 0;
+  if (key === 'chorus') pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 2 * Math.PI * choHz(x));
+  const px = m + x * (w - 2 * m), py = m + (1 - y) * (h - 2 * m), r = (9 + 5 * pulse * Math.min(1, y * 2)) * d;
+  pc.strokeStyle = 'rgba(79,195,255,0.35)';
+  pc.beginPath(); pc.moveTo(px, 0); pc.lineTo(px, h); pc.moveTo(0, py); pc.lineTo(w, py); pc.stroke();
+  pc.fillStyle = padPtr != null ? 'rgba(160,230,255,0.95)' : 'rgba(79,195,255,0.85)';
+  pc.beginPath(); pc.arc(px, py, r, 0, Math.PI * 2); pc.fill();
+  // what it means, in the corners
+  const [tx, ty] = padText(key);
+  pc.font = `${Math.round(10 * d)}px ui-monospace, Consolas, monospace`; pc.fillStyle = 'rgba(200,225,240,0.75)';
+  pc.textAlign = 'left'; pc.textBaseline = 'bottom'; pc.fillText(tx, 5 * d, h - 4 * d);
+  pc.textBaseline = 'top'; pc.fillText(ty, 5 * d, 4 * d);
+  // the tap button blinks on the beat
+  const bi = Math.floor(beat);
+  if (bi !== lastBeatInt) { lastBeatInt = bi; const t = $('#btnTap'); t.classList.add('beat'); setTimeout(() => t.classList.remove('beat'), 90); }
 }
 
 /* ---------- settings sheet ---------- */
@@ -696,7 +874,7 @@ function toast(msg, ms = 1800) { const t = $('#toast'); t.textContent = msg; t.h
 $('#btnSheet').onclick = () => $('#sheet').classList.toggle('open');
 $('#btnClose').onclick = () => $('#sheet').classList.remove('open');
 $('#btnReset').onclick = () => { rebuild(); toast('Water reset'); };
-$('#btnDefaults').onclick = () => { const ch = S.chords; S = JSON.parse(JSON.stringify(DEFAULTS)); S.chords = ch; save(); rebuild(); syncSheet(); sendSound(); toast('Defaults'); };
+$('#btnDefaults').onclick = () => { const ch = S.chords; S = JSON.parse(JSON.stringify(DEFAULTS)); S.chords = ch; save(); rebuild(); syncSheet(); syncFx(); sendSound(); sendFx(); toast('Defaults'); };
 $('#btnFull').onclick = async () => {
   try {
     if (!document.fullscreenElement) { await document.documentElement.requestFullscreen(); try { await screen.orientation.lock('landscape'); } catch (e) {} }
@@ -769,6 +947,7 @@ function step(dt) {
   simS += (performance.now() - t0 - simS) * 0.05; fpsS += (1 / dt - fpsS) * 0.05;
   drawWater();
   drawStrings(dt);
+  drawPad();
   if ((frameN++ & 15) === 0) {
     sensorChip(live);
     if ($('#sheet').classList.contains('open'))
@@ -781,6 +960,7 @@ initGL();
 layout();
 buildChords();
 buildSheet();
+buildFx();
 window.addEventListener('resize', layout);
 window.addEventListener('orientationchange', () => setTimeout(layout, 200));
 showPhoneLink();

@@ -785,6 +785,100 @@ function TouchGrassEngine() {
     }
   }
 
+  // ---- WaterHarp: the effects pad's chain ---------------------------------------
+  // Everything the right thumb plays, after the ensemble and before the echo
+  // (so echoes repeat the gated, filtered sound), all locked to one tempo:
+  //   chorus/vibrato -> resonant lowpass (+ its LFO) -> tremolo -> autopan -> gate
+  // The beat is counted here, per sample, so the synced LFOs never drift.
+  // Rates come as an index into SYNC_BEATS (2 bars .. 1/16), the chorus in Hz.
+  const SYNC_BEATS = [8, 4, 2, 1, 0.5, 0.25];
+  const GATE_BEATS = [1, 0.5, 0.25, 0.125];          // 1/4 .. 1/32
+  class FxChain {
+    constructor(sr) {
+      this.sr = sr; this.bpm = 96; this.beat = 0;
+      this.cut = 1; this.res = 0.1; this.cutNow = 1; this.resNow = 0.1;
+      this.lfoRate = 3; this.lfoDepth = 0;
+      this.gateRate = 1; this.gateDepth = 0; this.gateAmp = 1;
+      this.tremRate = 4; this.tremDepth = 0;
+      this.panRate = 3; this.panDepth = 0;
+      this.choRate = 0.6; this.choDepth = 0; this.choNow = 0; this.choPhase = 0;
+      this.depths = { lfo: 0, gate: 0, trem: 0, pan: 0 };   // smoothed, so a jump never clicks
+      this.s = [0, 0, 0, 0];                                 // the filter's state, two per channel
+      this.g = 1; this.k = 2; this.tick = 0;
+      const n = Math.floor(sr * 0.03) + 4;
+      this.dl = new Float32Array(n); this.dr = new Float32Array(n); this.w = 0;
+      this.smooth = 1 - Math.exp(-1 / (0.02 * sr));          // 20 ms for the pad's moves
+      this.gateSmooth = 1 - Math.exp(-1 / (0.003 * sr));     // 3 ms edges on the gate
+    }
+    set(c) {
+      const num = (v, a, b, d) => (typeof v === 'number' && isFinite(v) ? clamp(v, a, b) : d);
+      this.bpm = num(c.bpm, 40, 240, this.bpm);
+      this.cut = num(c.cut, 0, 1, this.cut); this.res = num(c.res, 0, 1, this.res);
+      this.lfoRate = num(c.lfoRate, 0, SYNC_BEATS.length - 1, this.lfoRate) | 0; this.lfoDepth = num(c.lfoDepth, 0, 1, this.lfoDepth);
+      this.gateRate = num(c.gateRate, 0, GATE_BEATS.length - 1, this.gateRate) | 0; this.gateDepth = num(c.gateDepth, 0, 1, this.gateDepth);
+      this.tremRate = num(c.tremRate, 0, SYNC_BEATS.length - 1, this.tremRate) | 0; this.tremDepth = num(c.tremDepth, 0, 1, this.tremDepth);
+      this.panRate = num(c.panRate, 0, SYNC_BEATS.length - 1, this.panRate) | 0; this.panDepth = num(c.panDepth, 0, 1, this.panDepth);
+      this.choRate = num(c.choRate, 0.05, 12, this.choRate); this.choDepth = num(c.choDepth, 0, 1, this.choDepth);
+    }
+    tap(line, d) {
+      const n = line.length; let pos = this.w - d;
+      while (pos < 0) pos += n;
+      const a = pos | 0, f = pos - a;
+      return line[a] * (1 - f) + line[(a + 1) % n] * f;
+    }
+    process(io) {
+      const sr = this.sr, sm = this.smooth, D = this.depths;
+      this.beat += this.bpm / 60 / sr;
+      if (this.beat > 1e6) this.beat -= 1e6;
+      this.cutNow += (this.cut - this.cutNow) * sm; this.resNow += (this.res - this.resNow) * sm;
+      this.choNow += (this.choDepth - this.choNow) * sm;
+      D.lfo += (this.lfoDepth - D.lfo) * sm; D.trem += (this.tremDepth - D.trem) * sm; D.pan += (this.panDepth - D.pan) * sm;
+      let L = io[0], R = io[1];
+
+      // chorus, turning into vibrato: a modulated short delay, the mix
+      // rising to all-wet past half depth
+      this.dl[this.w] = L; this.dr[this.w] = R;
+      if (this.choNow > 1e-4) {
+        this.choPhase += this.choRate / sr; if (this.choPhase >= 1) this.choPhase -= 1;
+        const ms = 0.3 + 4.2 * this.choNow, base = 7.5;
+        const dL = (base + ms * Math.sin(TAU * this.choPhase)) * 0.001 * sr;
+        const dR = (base + ms * Math.cos(TAU * this.choPhase)) * 0.001 * sr;
+        const mix = this.choNow < 0.5 ? this.choNow : 0.5 + (this.choNow - 0.5);
+        L = L * (1 - mix) + this.tap(this.dl, dL) * mix;
+        R = R * (1 - mix) + this.tap(this.dr, dR) * mix;
+      }
+      if (++this.w >= this.dl.length) this.w = 0;
+
+      // the lowpass: X on the Filter page is the cutoff (60 Hz .. 17 kHz,
+      // in octaves), Y the resonance; the LFO swings it up to three octaves
+      if ((this.tick++ & 15) === 0) {
+        const lfo = D.lfo > 1e-4 ? Math.sin(TAU * this.beat / SYNC_BEATS[this.lfoRate]) * D.lfo * 3 : 0;
+        const hz = Math.min(60 * Math.pow(2, this.cutNow * 8.2 + lfo), 0.45 * sr);
+        this.g = Math.tan(PI * hz / sr); this.k = 2 - 1.92 * this.resNow;
+      }
+      const g = this.g, k = this.k, a1 = 1 / (1 + g * (g + k)), a2 = g * a1, a3 = g * a2, s = this.s;
+      let v3 = L - s[1], v1 = a1 * s[0] + a2 * v3, v2 = s[1] + a2 * s[0] + a3 * v3;
+      s[0] = 2 * v1 - s[0]; s[1] = 2 * v2 - s[1]; L = v2;
+      v3 = R - s[3]; v1 = a1 * s[2] + a2 * v3; v2 = s[3] + a2 * s[2] + a3 * v3;
+      s[2] = 2 * v1 - s[2]; s[3] = 2 * v2 - s[3]; R = v2;
+
+      // tremolo and autopan
+      if (D.trem > 1e-4) {
+        const t = 1 - D.trem * (0.5 - 0.5 * Math.cos(TAU * this.beat / SYNC_BEATS[this.tremRate]));
+        L *= t; R *= t;
+      }
+      if (D.pan > 1e-4) {
+        const p = D.pan * Math.sin(TAU * this.beat / SYNC_BEATS[this.panRate]);
+        L *= 1 - Math.max(0, p); R *= 1 - Math.max(0, -p);
+      }
+      // the gate: on for the first half of every step, down by its depth for the rest
+      const ph = (this.beat / GATE_BEATS[this.gateRate]) % 1;
+      const want = ph < 0.5 ? 1 : 1 - this.gateDepth;
+      this.gateAmp += (want - this.gateAmp) * this.gateSmooth;
+      io[0] = L * this.gateAmp; io[1] = R * this.gateAmp;
+    }
+  }
+
   // ---- GrassEngine --------------------------------------------------------------
   const STRING_GAIN = 0.38, DRONE_GAIN = 1.1;
 
@@ -800,6 +894,8 @@ function TouchGrassEngine() {
       this.bow = new BowLayer(sr);       // WaterHarp: flowing water sings
       this.bells = new Bells(sr);        // WaterHarp: splashes ring
       this.acid = new AcidVoice(sr);     // WaterHarp: the 303-style line
+      this.fx = new FxChain(sr);         // WaterHarp: the effects pad
+      this.delayDiv = 1;
       this.plucks = Array.from({ length: pluckVoices }, () => new PluckVoice(sr));
       this.drone = Array.from({ length: 8 }, () => new JunoVoice(sr));
       this.ensemble = new Ensemble(sr);
@@ -949,6 +1045,7 @@ function TouchGrassEngine() {
         }
         const mono = strings * STRING_GAIN + pad * this.droneLevel * DRONE_GAIN;
         this.ensemble.process(mono, fr);
+        this.fx.process(fr);
         this.delay.process(fr);
         L[offset + i] = softClip(fr[0] * this.master);
         R[offset + i] = softClip(fr[1] * this.master);
@@ -971,6 +1068,8 @@ function TouchGrassEngine() {
         case "bow": this.bow.set(c.lv, c.nt, c.br); break;
         case "bowMode": this.bow.setMode(c.v); break;
         case "bell": this.bells.strike(c.note, c.vel, Math.round((c.delay || 0) * this.sr)); break;
+        case "fx": this.fx.set(c); if (c.bpm) this.delay.setTiming(this.fx.bpm, this.delayDiv); break;
+        case "space": this.delayDiv = clamp(c.div | 0, 0, 2); this.delay.setAmount(c.send, c.fb); this.delay.setTiming(this.fx.bpm, this.delayDiv); break;
         case "layers": if (c.bow != null) this.bow.gain = clamp(c.bow, 0, 2); if (c.bell != null) this.bells.gain = clamp(c.bell, 0, 2); break;
       }
     }
@@ -997,6 +1096,10 @@ function TouchGrassProcessor(E) {
       const out = outputs[0];
       const L = out[0], R = out[1] || out[0];
       this.engine.render(L, R, L.length);
+      // WaterHarp: tell the page where the beat is, about ten times a second,
+      // so what it draws and records follows the sound's own clock
+      if (this.engine.fx && (this.blocks = (this.blocks || 0) + 1) % 37 === 0)
+        this.port.postMessage({ beat: this.engine.fx.beat, bpm: this.engine.fx.bpm, time: currentTime });
       return true;
     }
   }

@@ -11,7 +11,7 @@ A water harp for your phone. Water sloshes over thirteen invisible strings. Hold
 - Three more layers, each with its own level in Settings: water **flowing** across a string makes it sing (Glass or Juno pad), **droplets** flying across a string ring a bell an octave up, and **deep water** on a string darkens its tone.
 - String voices: Harp, Omni, Vibes, Guitar, four Juno presets (Keys, Brass, Strings, Bass) and Acid 303, a 303-style bass line that slides when the water sweeps fast.
 - Water presets (the pill on the right steps through them; all of them in Settings): Water, Puddle, Swell, Splash, Honey, Moon.
-- Right: space for the effects pad (filter, space, modulation, with motion recording), coming next.
+- Right: the effects pad. Three pages: **Filter** (X cutoff, Y resonance), **Space** (X echo, Y reverb, echo in 1/8, dotted 1/8 or 1/4) and **Mod** (LFO on the filter, Gate, Tremolo, Autopan, Chorus/vibrato: X rate, Y depth). Every effect keeps its own point, so several modulations run at once; double-tap the pad to reset the one shown. Everything follows one tempo: tap it, or step it with − and +. Recording and looping the pad's moves comes next.
 - On a computer: hold keys 1–6 for chords, and the arrow keys to tilt.
 
 ## How the water plays
@@ -23,6 +23,7 @@ Above the resting water line lie zone lines that cut the height from the water l
 `node test/strumtest.js` runs the detector against the liquid in a few gestures (still water, slow tilt, quick tilt, rocking, finger drag) and prints every pluck.
 `node test/presettest.js` does the same for every water preset, and counts the plucks per octave zone.
 `node test/flowtest.js` shows the flow and the droplets per preset and gesture; `node test/layertest.js` renders the flow layer, the bells and every string voice offline.
+`node test/fxtest.js` checks the effects chain: transparent at rest, each effect doing its job, its cost.
 
 ## Run locally
 
