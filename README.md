@@ -11,7 +11,7 @@ A water harp for your phone. Water sloshes over thirteen invisible strings. Hold
 - Three more layers, each with its own level in Settings: water **flowing** across a string makes it sing (Glass or Juno pad), **droplets** flying across a string ring a bell an octave up, and **deep water** on a string darkens its tone.
 - String voices: Harp, Omni, Vibes, Guitar, four Juno presets (Keys, Brass, Strings, Bass) and Acid 303, a 303-style bass line that slides when the water sweeps fast.
 - Water presets (the pill on the right steps through them; all of them in Settings): Water, Puddle, Swell, Splash, Honey, Moon.
-- Right: the effects pad. Three pages: **Filter** (X cutoff, Y resonance), **Space** (X echo, Y reverb, echo in 1/8, dotted 1/8 or 1/4) and **Mod** (LFO on the filter, Gate, Tremolo, Autopan, Chorus/vibrato: X rate, Y depth). Every effect keeps its own point, so several modulations run at once; double-tap the pad to reset the one shown. Everything follows one tempo: tap it, or step it with − and +. Recording and looping the pad's moves comes next.
+- Right: the effects pad. Three pages: **Filter** (X cutoff, Y resonance), **Space** (X echo, Y reverb, echo in 1/8, dotted 1/8 or 1/4) and **Mod** (LFO on the filter, Gate, Tremolo, Autopan, Chorus/vibrato: X rate, Y depth). Every effect keeps its own point, so several modulations run at once; double-tap the pad to reset the one shown. Everything follows one tempo: tap it, or step it with − and +. **REC** records the pad's moves for 1, 2 or 4 bars and loops them, so your thumb is free for the water. Pressing REC on an effect that already loops overdubs only the parts you play; hold REC to erase the loop of the effect shown (or every loop, if it has none). Loops are saved between visits.
 - On a computer: hold keys 1–6 for chords, and the arrow keys to tilt.
 
 ## How the water plays
@@ -24,6 +24,7 @@ Above the resting water line lie zone lines that cut the height from the water l
 `node test/presettest.js` does the same for every water preset, and counts the plucks per octave zone.
 `node test/flowtest.js` shows the flow and the droplets per preset and gesture; `node test/layertest.js` renders the flow layer, the bells and every string voice offline.
 `node test/fxtest.js` checks the effects chain: transparent at rest, each effect doing its job, its cost.
+`node test/looptest.js` checks the motion looper: loop timing, overdub, the finger winning over playback, tempo, save and load.
 
 ## Run locally
 
@@ -41,6 +42,7 @@ node serve.js
 | `fluid-core.js` | FLIP liquid from [FluidSim](https://github.com/ojojboll-ui/FluidSim), with the drift correction scaled by cell size and time step |
 | `strum.js` | hears the water play the strings: plucks, the octave from the height, the flow across each string, droplets |
 | `presets.js` | the water presets |
+| `loops.js` | records and loops the effects pad's moves |
 | `engine.js` | sound: plucked voices, Juno presets, the acid line, the flow layer, bells, the pad, ensemble and echo, forked from Touch Grass's web port of Chordtroller |
 | `index.html` | the instrument |
 | `test/` | `strumtest.js`, `presettest.js`, `padtest.js`, `resttest.js` (resting water stays at rest), `coretest.js` (the liquid at 4–200 cells) |
