@@ -83,6 +83,13 @@ h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12
 .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .row output { font: 12px var(--mono); color: var(--accent); align-self: center; }
 .row small { grid-column: 1 / -1; color: var(--dim); font-size: 12px; }
+.crow { display: flex; gap: 6px; align-items: center; padding: 3px 0; }
+.crow span { width: 1.2em; color: var(--dim); font: 12px var(--mono); }
+.crow select { flex: 1; min-width: 0; background: rgba(20, 32, 46, 0.9); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 6px; font: inherit; }
+.crow button, .slots button { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.crow button:disabled, .slots button:disabled, #chordAdd:disabled { opacity: 0.35; cursor: default; }
+#chordAdd { margin-top: 6px; }
+.slots span { align-self: center; width: 3em; color: var(--dim); font-size: 12px; }
 .row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 6px 0 2px; accent-color: var(--accent); height: 26px; }
 .seg { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 4px; }
 .seg button { flex: 1 1 auto; min-width: 58px; border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 8px 6px; cursor: pointer; }
@@ -131,7 +138,7 @@ h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12
       <button class="pill" id="btnDefaults">Defaults</button>
       <button class="pill" id="btnFull">Full screen</button>
     </div>
-    <p class="note">Hold a chord on the left, then tilt the phone or drag through the water. On a computer: hold keys 1–6 for chords, arrow keys to tilt.</p>
+    <p class="note">Hold a chord on the left, then tilt the phone or drag through the water. On a computer: hold keys 1–8 for chords, arrow keys to tilt.</p>
     <div id="qrbox" hidden><h3>Open on your phone</h3><div id="qr"></div></div>
     <div id="stats"></div>
   </aside>
@@ -163,6 +170,7 @@ const STRINGS = 13;
 const DEFAULTS = {
   voice: 1, ring: 3.5, pad: 0.35, volume: 0.9,
   pluck: 1, bow: 0.3, bell: 0.5, bowMode: 0, depthColor: 0.6,   // the layers
+  sound: 'Harp Lake',   // the sound last chosen (cleared when you change its parts)
   size: 0.35, fill: 0.3, flip: 0.9, damping: 0.05, sens: 1, gravity: 1, inertia: 1, invert: 'auto', preset: 'Water',
   span: 2, register: -12,   // octave zones above the water line; the base octave relative to the chord's plate
   chords: [[0, 0], [7, 0], [9, 1], [5, 0], [2, 1], [4, 1]],   // C G Am F Dm Em
@@ -893,9 +901,119 @@ function seg(key, title, opts, parse) {
   }
   ctl.appendChild(box); inputs[key] = { seg: box };
 }
+/* ---------- sounds: whole-instrument presets, and three of your own ---------- */
+// A sound sets the string voice, the layers, the register, the water and the
+// effects pad (points not named go back to rest) and the tempo. It leaves
+// your chords and your loops alone.
+const SOUNDS = {
+  'Harp Lake':    { voice: 1, bowMode: 0, bow: 0.3, bell: 0.5, pluck: 1, register: -12, span: 2, ring: 3.5, pad: 0.35, water: 'Water', bpm: 96, div: 1, fx: { space: [0.35, 0.5] } },
+  'Acid Puddle':  { voice: 10, bowMode: 0, bow: 0, bell: 0.25, pluck: 1, register: -12, span: 1, ring: 3, pad: 0.15, water: 'Puddle', bpm: 124, div: 1, fx: { filter: [0.55, 0.75], space: [0.5, 0.2], gate: [0.66, 0.35] } },
+  'Juno Swell':   { voice: 8, bowMode: 1, bow: 0.55, bell: 0.3, pluck: 0.8, register: -12, span: 2, ring: 5, pad: 0.3, water: 'Swell', bpm: 80, div: 2, fx: { space: [0.3, 0.6], chorus: [0.25, 0.35] } },
+  'Moon Bells':   { voice: 2, bowMode: 0, bow: 0.4, bell: 1, pluck: 0.9, register: 0, span: 2, ring: 6, pad: 0.25, water: 'Moon', bpm: 72, div: 2, fx: { space: [0.55, 0.7] } },
+  'Honey Keys':   { voice: 7, bowMode: 1, bow: 0.35, bell: 0.2, pluck: 1, register: -12, span: 1, ring: 3, pad: 0.35, water: 'Honey', bpm: 90, div: 1, fx: { filter: [0.7, 0.35], lfo: [0.33, 0.35], space: [0.3, 0.4] } },
+  'Splash Brass': { voice: 6, bowMode: 1, bow: 0.3, bell: 0.6, pluck: 0.9, register: -12, span: 2, ring: 4, pad: 0.3, water: 'Splash', bpm: 108, div: 0, fx: { trem: [0.8, 0.35], space: [0.4, 0.45] } },
+};
+const SOUND_KEYS = ['voice', 'bowMode', 'bow', 'bell', 'pluck', 'register', 'span', 'ring', 'pad', 'depthColor'];
+function snapshotSound() {
+  const s = { fx: JSON.parse(JSON.stringify(S.fx.pts)), bpm: S.fx.bpm, div: S.fx.div, water: S.preset || '',
+              waterCustom: { size: S.size, fill: S.fill, flip: S.flip, damping: S.damping, gravity: S.gravity } };
+  for (const k of SOUND_KEYS) s[k] = S[k];
+  return s;
+}
+function applySound(name, p) {
+  for (const k of SOUND_KEYS) if (p[k] != null) S[k] = p[k];
+  S.fx.pts = JSON.parse(JSON.stringify(NEUTRAL));
+  for (const k in p.fx || {}) S.fx.pts[k] = [p.fx[k][0], p.fx[k][1]];
+  if (p.bpm) S.fx.bpm = p.bpm;
+  if (p.div != null) S.fx.div = p.div;
+  S.sound = name;
+  if (p.water && WaterPresets[p.water]) applyPreset(p.water, true);
+  else if (p.waterCustom) {
+    const refill = Math.abs(p.waterCustom.fill - S.fill) > 1e-6;
+    Object.assign(S, p.waterCustom, { preset: '' });
+    if (refill) rebuild(); else { sim.setWidth(S.size); Object.assign(sim.params, { flipRatio: S.flip, damping: S.damping }); }
+  }
+  strum.p.span = S.span;
+  save(); syncSheet(); syncFx(); sendSound(); sendFx();
+  toast(name, 1600);
+}
+let mySounds = [null, null, null];
+try { const m = JSON.parse(localStorage.getItem('waterharp.mysounds') || 'null'); if (Array.isArray(m)) mySounds = m.slice(0, 3).concat([null, null, null]).slice(0, 3); } catch (e) {}
+function buildSounds(ctl) {
+  seg('sound', 'Sounds', Object.keys(SOUNDS).map(n => [n, n]));
+  const note = document.createElement('p'); note.className = 'note';
+  note.textContent = 'A sound sets the strings, the layers, the water and the effects pad. Your chords and loops stay.'; ctl.appendChild(note);
+  const h = document.createElement('h3'); h.textContent = 'My sounds'; ctl.appendChild(h);
+  for (const [label, act] of [['Load', 'load'], ['Save', 'save']]) {
+    const row = document.createElement('div'); row.className = 'seg slots'; row.dataset.act = act;
+    const lab = document.createElement('span'); lab.textContent = label; row.appendChild(lab);
+    for (let i = 0; i < 3; i++) {
+      const b = document.createElement('button'); b.textContent = String(i + 1); b.dataset.i = i;
+      b.onclick = () => {
+        if (act === 'save') { mySounds[i] = snapshotSound(); toast(`Saved to slot ${i + 1}`); }
+        else if (mySounds[i]) applySound(`My sound ${i + 1}`, mySounds[i]);
+        try { localStorage.setItem('waterharp.mysounds', JSON.stringify(mySounds)); } catch (e) {}
+        syncSlots();
+      };
+      row.appendChild(b);
+    }
+    ctl.appendChild(row);
+  }
+}
+function syncSlots() {
+  for (const b of document.querySelectorAll('.slots[data-act="load"] button')) b.disabled = !mySounds[+b.dataset.i];
+}
+
+/* ---------- your chords: 4 to 8, or a ready-made set ---------- */
+const CHORD_SETS = {
+  'Pop in C':     [[0, 0], [7, 0], [9, 1], [5, 0], [2, 1], [4, 1]],    // C G Am F Dm Em
+  'Pop in G':     [[7, 0], [2, 0], [4, 1], [0, 0], [9, 1], [11, 1]],   // G D Em C Am Bm
+  'Sad in Am':    [[9, 1], [5, 0], [0, 0], [7, 0], [2, 1], [4, 2]],    // Am F C G Dm E7
+  'Dreamy in F':  [[5, 3], [2, 4], [7, 4], [0, 2], [9, 4], [10, 3]],   // Fmaj7 Dm7 Gm7 C7 Am7 Bbmaj7
+  'Blues in A':   [[9, 2], [2, 2], [4, 2], [6, 1]],                    // A7 D7 E7 F#m
+};
+const KIND_NAMES = ['Major', 'Minor', '7', 'Maj7', 'm7'];
+function buildChordEditor(ctl) {
+  const h = document.createElement('h3'); h.textContent = 'Chords'; ctl.appendChild(h);
+  const sets = document.createElement('div'); sets.className = 'seg'; sets.id = 'chordSets';
+  for (const name of Object.keys(CHORD_SETS)) {
+    const b = document.createElement('button'); b.textContent = name; b.dataset.set = name;
+    b.onclick = () => setChords(CHORD_SETS[name].map(c => c.slice()));
+    sets.appendChild(b);
+  }
+  ctl.appendChild(sets);
+  const list = document.createElement('div'); list.id = 'chordList'; ctl.appendChild(list);
+  const add = document.createElement('button'); add.className = 'pill'; add.id = 'chordAdd'; add.textContent = '+ Add a chord';
+  add.onclick = () => { const last = S.chords[S.chords.length - 1] || [0, 0]; setChords(S.chords.concat([[(last[0] + 7) % 12, last[1]]])); };
+  ctl.appendChild(add);
+  renderChordList();
+}
+function renderChordList() {
+  const list = $('#chordList'); list.innerHTML = '';
+  S.chords.forEach(([r, q], i) => {
+    const row = document.createElement('div'); row.className = 'crow';
+    row.innerHTML = `<span>${i + 1}</span><select aria-label="Root of chord ${i + 1}">${NOTE_NAMES.map((n, k) => `<option value="${k}"${k === r ? ' selected' : ''}>${n}</option>`).join('')}</select>` +
+      `<select aria-label="Kind of chord ${i + 1}">${KIND_NAMES.map((n, k) => `<option value="${k}"${k === q ? ' selected' : ''}>${n}</option>`).join('')}</select>` +
+      `<button aria-label="Remove chord ${i + 1}"${S.chords.length <= 4 ? ' disabled' : ''}>×</button>`;
+    const [root, kind] = row.querySelectorAll('select');
+    root.onchange = kind.onchange = () => { const c = S.chords.map(x => x.slice()); c[i] = [+root.value, +kind.value]; setChords(c); };
+    row.querySelector('button').onclick = () => setChords(S.chords.filter((_, k) => k !== i));
+    list.appendChild(row);
+  });
+  $('#chordAdd').disabled = S.chords.length >= 8;
+  const same = (a, b) => a.length === b.length && a.every((c, i) => c[0] === b[i][0] && c[1] === b[i][1]);
+  for (const b of $('#chordSets').children) b.classList.toggle('on', same(S.chords, CHORD_SETS[b.dataset.set]));
+}
+function setChords(c) {
+  S.chords = c.slice(0, 8);
+  save(); buildChords(); renderChordList();
+}
+
 let rebuildTimer = 0;
 function buildSheet() {
   const ctl = $('#controls');
+  buildSounds(ctl);
+  buildChordEditor(ctl);
   seg('preset', 'Water', Object.fromEntries(Object.keys(WaterPresets).map(n => [n, n])));
   const pnote = document.createElement('p'); pnote.className = 'note'; pnote.id = 'presetNote'; ctl.appendChild(pnote);
   seg('voice', 'Strings', VOICE_NAMES, v => +v);
@@ -913,7 +1031,7 @@ function buildSheet() {
     ctl.appendChild(row); inputs[d.k] = { d, inp, out };
   }
   seg('invert', 'Tilt axes', { auto: 'Auto', no: 'Normal', yes: 'Inverted' });
-  syncSheet();
+  syncSheet(); syncSlots();
 }
 function syncSheet() {
   for (const [k, el] of Object.entries(inputs)) {
@@ -928,7 +1046,9 @@ function syncSheet() {
 const PRESET_KEYS = ['size', 'fill', 'flip', 'damping', 'gravity'];
 function setVal(k, v) {
   if (k === 'preset') { applyPreset(v); return; }
+  if (k === 'sound') { applySound(v, SOUNDS[v]); return; }
   S[k] = v;
+  if (SOUND_KEYS.includes(k) || PRESET_KEYS.includes(k)) S.sound = '';
   if (PRESET_KEYS.includes(k)) S.preset = '';
   save(); syncSheet();
   const d = SLIDERS.find(x => x.k === k);
@@ -938,7 +1058,7 @@ function setVal(k, v) {
   if (k === 'span') strum.p.span = v;
   if (d && d.rebuild) { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuild, 150); }
 }
-function applyPreset(name) {
+function applyPreset(name, quiet) {
   const p = WaterPresets[name];
   if (!p) return;
   const refill = Math.abs(p.fill - S.fill) > 1e-6;
@@ -946,7 +1066,7 @@ function applyPreset(name) {
   save(); syncSheet();
   if (refill) rebuild();
   else { sim.setWidth(S.size); Object.assign(sim.params, { flipRatio: S.flip, damping: S.damping }); }
-  toast(`${name}: ${p.note}`, 2600);
+  if (!quiet) toast(`${name}: ${p.note}`, 2600);
 }
 // the preset pill steps through the presets while you play
 $('#btnPreset').onclick = () => {
