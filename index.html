@@ -169,7 +169,7 @@ const STRINGS = 13;
 /* ---------- settings ---------- */
 const DEFAULTS = {
   voice: 1, ring: 3.5, pad: 0.35, volume: 0.9,
-  pluck: 1, bow: 0.3, bell: 0.5, bowMode: 0, depthColor: 0.6,   // the layers
+  pluck: 1, bow: 0.3, bowMode: 0, depthColor: 0.6,   // the layers
   sound: 'Harp Lake',   // the sound last chosen (cleared when you change its parts)
   size: 0.35, fill: 0.3, flip: 0.9, damping: 0.05, sens: 1, gravity: 1, inertia: 1, invert: 'auto', preset: 'Water',
   span: 2, register: -12,   // octave zones above the water line; the base octave relative to the chord's plate
@@ -182,7 +182,9 @@ const DEFAULTS = {
 };
 let S = JSON.parse(JSON.stringify(DEFAULTS));
 try { Object.assign(S, JSON.parse(localStorage.getItem('waterharp.settings') || '{}')); } catch (e) {}
-if (S.voice === 4 || S.voice === 5) S.voice = 1;   // the cello and the ney were removed
+const goneVoice = v => v === 4 || v === 5 || v > 8;   // cello, ney, Juno Bass and Acid 303 were removed
+if (goneVoice(S.voice)) S.voice = 1;
+delete S.bell;
 S.fx = Object.assign({}, DEFAULTS.fx, S.fx); S.fx.pts = Object.assign({}, DEFAULTS.fx.pts, S.fx.pts);
 const save = () => { try { localStorage.setItem('waterharp.settings', JSON.stringify(S)); } catch (e) {} };
 
@@ -192,7 +194,7 @@ const chordName = (r, q) => NOTE_NAMES[r] + KIND[q];
 const noteName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
 // engine voice index -> name, in the order shown (4 and 5, Touch Grass's
 // cello and ney, are left out); an array, since an object would sort the numbers
-const VOICE_NAMES = [[1, 'Harp'], [0, 'Omni'], [2, 'Vibes'], [3, 'Guitar'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, 'Juno Strings'], [9, 'Juno Bass'], [10, 'Acid 303']];
+const VOICE_NAMES = [[1, 'Harp'], [0, 'Omni'], [2, 'Vibes'], [3, 'Guitar'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, 'Juno Strings']];
 
 /* ---------- stage: always landscape ---------- */
 let view = { vw: 1, vh: 1, dpr: 1, rot: 0, SW: 1, SH: 1 };
@@ -562,7 +564,7 @@ function sendSound() {
   post({ t: 'droneBright', v: 0.42 });
   post({ t: 'master', v: S.volume });
   post({ t: 'bowMode', v: S.bowMode });
-  post({ t: 'layers', bow: S.bow, bell: S.bell });
+  post({ t: 'layers', bow: S.bow });
 }
 document.addEventListener('visibilitychange', () => {
   if (!ctx) return;
@@ -622,22 +624,10 @@ function playFlow() {
   post({ t: 'bow', lv: Array.from(flowLevel), nt: bowNotes, br: bowBright });
 }
 
-// splashes ring: a bell an octave over the string a loose droplet flies across,
-// at most about ten a second, so a wild slosh glitters and does not clatter
-const bellBucket = { tokens: 4, rate: 10, max: 4 };
+// loose droplets crossing a string leave a fleck of light (no sound)
 const flecks = [];   // {x, y, t}
 function playDrops(drops, dt) {
-  bellBucket.tokens = Math.min(bellBucket.max, bellBucket.tokens + dt * bellBucket.rate);
-  const chord = currentChord();
-  for (const d of drops) {
-    flecks.push({ k: d.string, y: d.y, t: 0 });
-    if (!chord || !ctx || S.bell <= 0 || bellBucket.tokens < 1) continue;
-    bellBucket.tokens -= 1;
-    let n = noteFor(chord, d.string, 0) + 12;
-    while (n < 72) n += 12;
-    while (n > 103) n -= 12;
-    post({ t: 'bell', note: n, vel: clamp(0.3 + 0.35 * d.speed, 0.3, 1), delay: d.frac * dt });
-  }
+  for (const d of drops) flecks.push({ k: d.string, y: d.y, t: 0 });
   if (flecks.length > 40) flecks.splice(0, flecks.length - 40);
 }
 
@@ -878,7 +868,6 @@ const SLIDERS = [
   { sec: 'Layers' },
   { k: 'pluck', label: 'Plucks', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', help: 'Waves running onto a string.' },
   { k: 'bow', label: 'Flow', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'Water flowing across a string makes it sing, as loud as the flow.' },
-  { k: 'bell', label: 'Splash bells', min: 0, max: 1.5, fmt: v => Math.round(v * 100) + ' %', send: true, help: 'Droplets flying across a string ring a bell an octave up.' },
   { k: 'depthColor', label: 'Depth colour', min: 0, max: 1, fmt: v => Math.round(v * 100) + ' %', help: 'Deep water on a string darkens its tone.' },
   { sec: 'Water' },
   { k: 'size', label: 'Tank size', min: 0.15, max: 1.5, log: true, fmt: v => Math.round(v * 100) + ' cm', help: 'A small tank makes quick waves and fast strums; a big one slow swells.', resize: true },
@@ -906,14 +895,13 @@ function seg(key, title, opts, parse) {
 // effects pad (points not named go back to rest) and the tempo. It leaves
 // your chords and your loops alone.
 const SOUNDS = {
-  'Harp Lake':    { voice: 1, bowMode: 0, bow: 0.3, bell: 0.5, pluck: 1, register: -12, span: 2, ring: 3.5, pad: 0.35, water: 'Water', bpm: 96, div: 1, fx: { space: [0.35, 0.5] } },
-  'Acid Puddle':  { voice: 10, bowMode: 0, bow: 0, bell: 0.25, pluck: 1, register: -12, span: 1, ring: 3, pad: 0.15, water: 'Puddle', bpm: 124, div: 1, fx: { filter: [0.55, 0.75], space: [0.5, 0.2], gate: [0.66, 0.35] } },
-  'Juno Swell':   { voice: 8, bowMode: 1, bow: 0.55, bell: 0.3, pluck: 0.8, register: -12, span: 2, ring: 5, pad: 0.3, water: 'Swell', bpm: 80, div: 2, fx: { space: [0.3, 0.6], chorus: [0.25, 0.35] } },
-  'Moon Bells':   { voice: 2, bowMode: 0, bow: 0.4, bell: 1, pluck: 0.9, register: 0, span: 2, ring: 6, pad: 0.25, water: 'Moon', bpm: 72, div: 2, fx: { space: [0.55, 0.7] } },
-  'Honey Keys':   { voice: 7, bowMode: 1, bow: 0.35, bell: 0.2, pluck: 1, register: -12, span: 1, ring: 3, pad: 0.35, water: 'Honey', bpm: 90, div: 1, fx: { filter: [0.7, 0.35], lfo: [0.33, 0.35], space: [0.3, 0.4] } },
-  'Splash Brass': { voice: 6, bowMode: 1, bow: 0.3, bell: 0.6, pluck: 0.9, register: -12, span: 2, ring: 4, pad: 0.3, water: 'Splash', bpm: 108, div: 0, fx: { trem: [0.8, 0.35], space: [0.4, 0.45] } },
+  'Harp Lake':    { voice: 1, bowMode: 0, bow: 0.3, pluck: 1, register: -12, span: 2, ring: 3.5, pad: 0.35, water: 'Water', bpm: 96, div: 1, fx: { space: [0.35, 0.5] } },
+  'Juno Swell':   { voice: 8, bowMode: 1, bow: 0.55, pluck: 0.8, register: -12, span: 2, ring: 5, pad: 0.3, water: 'Swell', bpm: 80, div: 2, fx: { space: [0.3, 0.6], chorus: [0.25, 0.35] } },
+  'Moon Vibes':   { voice: 2, bowMode: 0, bow: 0.4, pluck: 0.9, register: 0, span: 2, ring: 6, pad: 0.25, water: 'Moon', bpm: 72, div: 2, fx: { space: [0.55, 0.7] } },
+  'Honey Keys':   { voice: 7, bowMode: 1, bow: 0.35, pluck: 1, register: -12, span: 1, ring: 3, pad: 0.35, water: 'Honey', bpm: 90, div: 1, fx: { filter: [0.7, 0.35], lfo: [0.33, 0.35], space: [0.3, 0.4] } },
+  'Splash Brass': { voice: 6, bowMode: 1, bow: 0.3, pluck: 0.9, register: -12, span: 2, ring: 4, pad: 0.3, water: 'Splash', bpm: 108, div: 0, fx: { trem: [0.8, 0.35], space: [0.4, 0.45] } },
 };
-const SOUND_KEYS = ['voice', 'bowMode', 'bow', 'bell', 'pluck', 'register', 'span', 'ring', 'pad', 'depthColor'];
+const SOUND_KEYS = ['voice', 'bowMode', 'bow', 'pluck', 'register', 'span', 'ring', 'pad', 'depthColor'];
 function snapshotSound() {
   const s = { fx: JSON.parse(JSON.stringify(S.fx.pts)), bpm: S.fx.bpm, div: S.fx.div, water: S.preset || '',
               waterCustom: { size: S.size, fill: S.fill, flip: S.flip, damping: S.damping, gravity: S.gravity } };
@@ -922,6 +910,7 @@ function snapshotSound() {
 }
 function applySound(name, p) {
   for (const k of SOUND_KEYS) if (p[k] != null) S[k] = p[k];
+  if (goneVoice(S.voice)) S.voice = 1;
   S.fx.pts = JSON.parse(JSON.stringify(NEUTRAL));
   for (const k in p.fx || {}) S.fx.pts[k] = [p.fx[k][0], p.fx[k][1]];
   if (p.bpm) S.fx.bpm = p.bpm;

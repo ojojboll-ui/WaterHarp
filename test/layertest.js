@@ -1,4 +1,4 @@
-// node test/layertest.js -> the bow layer, the bells and the string voices,
+// node test/layertest.js -> the bow layer and the string voices,
 // rendered offline. Bow: loudness as the flow swells, holds and stops (it
 // must fall silent), and the cost with all 13 strings singing. Voices: a
 // sweep of the Am plate, loudness over time and the cost. NaN checks all over.
@@ -25,7 +25,7 @@ function engine() {
 console.log('BOW LAYER: four strings, flow swells for 1 s, holds 1 s, stops (dB per 0.25 s)');
 for (const [mode, name] of [[0, 'GLASS'], [1, 'JUNO']]) {
   const eng = engine();
-  eng.command({ t: 'bowMode', v: mode }); eng.command({ t: 'layers', bow: 1, bell: 1 });
+  eng.command({ t: 'bowMode', v: mode }); eng.command({ t: 'layers', bow: 1 });
   const row = []; let bad = false;
   for (let f = 0; f < 60; f++) {
     const lv = new Array(13).fill(0), t = f / 20, level = t < 1 ? t : t < 2 ? 1 : 0;
@@ -41,7 +41,7 @@ for (const [mode, name] of [[0, 'GLASS'], [1, 'JUNO']]) {
 }
 
 console.log('\nSTRING VOICES: a sweep of Am over 0.6 s (dB per 0.25 s), peak, cost');
-for (const [v, name] of [[1, 'Harp'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, 'Juno Strings'], [9, 'Juno Bass'], [10, 'Acid 303']]) {
+for (const [v, name] of [[1, 'Harp'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, 'Juno Strings']]) {
   const eng = engine();
   eng.command({ t: 'voice', v });
   AM.forEach((n, i) => eng.command({ t: 'pluckNote', note: n, vel: i % 4 === 0 ? 0.9 : 0.6, delay: i * 0.05, bright: 0.8 }));
@@ -50,22 +50,4 @@ for (const [v, name] of [[1, 'Harp'], [7, 'Juno Keys'], [6, 'Juno Brass'], [8, '
   for (let f = 0; f < 16; f++) { const r = render(eng, 5); row.push(db(r.rms)); peak = Math.max(peak, r.peak); bad = bad || r.bad; }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   console.log(`  ${name.padEnd(12)} ${row.join(' ')} | peak ${peak.toFixed(2)} | ${(ms / 40).toFixed(1)}% of real time | NaN ${bad}`);
-}
-
-// the acid line slides: notes 50 ms apart inside a gate longer than that should not restrike the filter
-{
-  const eng = engine(); eng.command({ t: 'voice', v: 10 });
-  [45, 48, 52, 57].forEach((n, i) => eng.command({ t: 'pluckNote', note: n, vel: 0.6, delay: i * 0.05 }));
-  const hz = [];
-  for (let f = 0; f < 6; f++) { render(eng, 1); hz.push(eng.acid.hz.toFixed(0)); }
-  console.log(`\nACID slide, pitch every 50 ms (Hz): ${hz.join(' ')}  (A2 110, C3 131, E3 165, A3 220)`);
-}
-
-// bells
-{
-  const eng = engine(); eng.command({ t: 'layers', bell: 1 });
-  for (let i = 0; i < 6; i++) eng.command({ t: 'bell', note: 84 + 2 * i, vel: 0.8, delay: i * 0.08 });
-  const row = [];
-  for (let f = 0; f < 24; f++) { const r = render(eng, 1); if (f % 2 === 1) row.push(db(r.rms)); }
-  console.log(`BELLS six strikes, then ring out (dB per 0.1 s): ${row.join(' ')}`);
 }

@@ -1,7 +1,7 @@
 // WaterHarp's sound engine: forked from Touch Grass (touchgrass/web/engine.js),
 // which is its web port of Chordtroller. WaterHarp changes: a chordOff command
 // (the pad sounds only while a chord button is held), a quicker pad, a bow
-// layer (flowing water sings) and bells (splashes ring).
+// layer (flowing water sings).
 //
 // Touch Grass's sound engine for the web: a line-by-line port of gdext/src
 // (GrassEngine.h and the Chordtroller headers it plays: PluckVoice,
@@ -31,12 +31,10 @@ function TouchGrassEngine() {
     { name: "NEY", blown: true, decayScale: 1.0 },
     // Chordtroller's Juno voice played as a keyboard: each string a key held a while
     { name: "JUNO", synth: true, juno: "BRASS", decayScale: 1.0 },
-    // WaterHarp: more Juno presets, and a 303-style acid line (indices 4 and 5,
+    // WaterHarp: more Juno presets (indices 4 and 5,
     // the cello and the ney, stay for Touch Grass but WaterHarp does not offer them)
     { name: "JUNO KEYS", synth: true, juno: "KEYS", decayScale: 1.0 },
     { name: "JUNO STRINGS", synth: true, juno: "STRINGS", decayScale: 1.0 },
-    { name: "JUNO BASS", synth: true, juno: "BASS", decayScale: 1.0 },
-    { name: "ACID", acid: true, decayScale: 1.0 },
   ];
 
   const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
@@ -218,8 +216,6 @@ function TouchGrassEngine() {
                env: 0.50, key: 0.35, hpf: 0.08, A: 0.003, D: 0.45, S: 0.25, R: 0.45, level: 0.95, cut: 0.26, hold: 0.12, fold: 48 },
     STRINGS: { saw: 1.00, pulse: 0.20, sub: 0.10, noise: 0.0, pw: 0.50, pwm: 0.45, lfoRate: 0.55,
                env: 0.12, key: 0.30, hpf: 0.12, A: 0.22, D: 1.40, S: 0.85, R: 1.20, level: 0.55, cut: 0.42, hold: 0.35, fold: 48 },
-    BASS:    { saw: 0.30, pulse: 0.70, sub: 0.80, noise: 0.0, pw: 0.30, pwm: 0.05, lfoRate: 0.3,
-               env: 0.45, key: 0.20, hpf: 0.00, A: 0.002, D: 0.35, S: 0.45, R: 0.22, level: 0.70, cut: 0.18, hold: 0.15, fold: 28, top: 60 },
   };
 
   class JunoVoice {
@@ -512,72 +508,6 @@ function TouchGrassEngine() {
     }
   }
 
-  // ---- WaterHarp: ACID, a 303-style bass line ----------------------------------
-  // One voice, as on the little silver bass box: a saw through a resonant
-  // four-pole lowpass whose cutoff jumps with every note and falls back. A
-  // note that comes while the last one's gate is still open SLIDES there
-  // without restriking, so a sweep of the strings becomes a gliding acid run.
-  // Hard plucks are accents: more envelope, a little louder, a shorter fall.
-  class AcidVoice {
-    constructor(sr) {
-      this.sr = sr; this.phase = 0; this.hz = 110; this.hzTarget = 110;
-      this.amp = 0; this.gate = 0; this.fenv = 0; this.accent = 0; this.active = false;
-      this.s1 = this.s2 = this.s3 = this.s4 = 0; this.tick = 0; this.g = 0.5; this.G = 0.3;
-      this.cutoff = 0.32; this.reso = 0.82; this.envMod = 0.55;
-      this.pending = [];
-      this.slideCoef = 1 - Math.exp(-1 / (0.055 * sr));
-      this.attack = 1 - Math.exp(-1 / (0.002 * sr)); this.release = 1 - Math.exp(-1 / (0.008 * sr));
-    }
-    strike(note, vel, gateSeconds, delaySamples) {
-      if (this.pending.length < 32) this.pending.push({ note, vel, gate: gateSeconds, left: Math.max(0, delaySamples | 0) });
-    }
-    noteOn(note, vel, gateSeconds) {
-      while (note > 64) note -= 12;               // a bass line: E1 .. E4
-      while (note < 28) note += 12;
-      const hz = 440 * Math.pow(2, (note - 69) / 12);
-      const slide = this.gate > 0;
-      this.hzTarget = hz;
-      if (!slide) { this.hz = hz; this.fenv = 1; }           // a fresh note restrikes the filter
-      this.accent = vel > 0.7 ? 1 : 0;
-      if (this.accent) this.fenv = Math.max(this.fenv, 1);    // an accent pushes it even mid-slide
-      this.velAmp = 0.6 + 0.4 * clamp(vel, 0, 1) + 0.25 * this.accent;
-      this.gate = Math.max(1, Math.round(gateSeconds * this.sr));
-      this.fdecay = Math.pow(0.001, 1 / (this.sr * (this.accent ? 0.22 : 0.45)));
-      this.active = true;
-    }
-    allOff() { this.gate = 0; this.pending.length = 0; }
-    process() {
-      const p = this.pending;
-      for (let k = 0; k < p.length;) {
-        if (p[k].left-- > 0) { k++; continue; }
-        this.noteOn(p[k].note, p[k].vel, p[k].gate); p[k] = p[p.length - 1]; p.pop();
-      }
-      if (!this.active) return 0;
-      const open = this.gate > 0;
-      if (open) this.gate--;
-      this.amp += ((open ? this.velAmp : 0) - this.amp) * (open ? this.attack : this.release);
-      if (!open && this.amp < 1e-4) { this.active = false; this.amp = 0; return 0; }
-      this.hz += (this.hzTarget - this.hz) * this.slideCoef;
-      this.fenv *= this.fdecay;
-      const dt = this.hz / this.sr;
-      const saw = (2 * this.phase - 1) - polyBlep(this.phase, dt);
-      this.phase += dt; if (this.phase >= 1) this.phase -= 1;
-      if ((this.tick++ & 7) === 0) {
-        const pos = clamp(this.cutoff + this.fenv * this.envMod * (1 + 0.6 * this.accent), 0, 1);
-        const hzc = Math.min(30 * Math.pow(2, pos * 9.2), 0.45 * this.sr);
-        this.g = Math.tan(PI * hzc / this.sr); this.G = this.g / (1 + this.g);
-      }
-      const g = this.g, G = this.G, k = this.reso * 3.7;
-      const S = (G * G * G * this.s1 + G * G * this.s2 + G * this.s3 + this.s4) / (1 + g);
-      const u = softClip((saw * 1.4 - k * S) / (1 + k * G * G * G * G));
-      let v = (u - this.s1) * G; const y1 = v + this.s1; this.s1 = y1 + v;
-      v = (y1 - this.s2) * G; const y2 = v + this.s2; this.s2 = y2 + v;
-      v = (y2 - this.s3) * G; const y3 = v + this.s3; this.s3 = y3 + v;
-      v = (y3 - this.s4) * G; const y4 = v + this.s4; this.s4 = y4 + v;
-      return softClip(y4 * (1 + k * 0.45) * 1.3) * this.amp * 0.5;
-    }
-  }
-
   // ---- the ney: a blown reed flute ------------------------------------------------
   // No free ney recordings exist with more than a note or two, so it is made:
   // a soft fundamental with a few weak overtones, breath noise tuned to the same
@@ -735,56 +665,6 @@ function TouchGrassEngine() {
     }
   }
 
-  // ---- WaterHarp: bells for the splashes ----------------------------------------
-  // A struck metal bar: a few inharmonic partials (a glockenspiel's 1, 2.76,
-  // 5.40, 8.93), each dying faster than the one below, and a click of attack.
-  const BELL_RATIO = [1, 2.756, 5.404, 8.933], BELL_AMP = [1, 0.42, 0.2, 0.09], BELL_DECAY = [1.6, 0.6, 0.28, 0.12];
-  class Bells {
-    constructor(sr, voices = 16) {
-      this.sr = sr; this.gain = 0.5; this.pending = []; this.stamp = 0;
-      this.v = Array.from({ length: voices }, () => ({ on: false, ph: new Float64Array(4), inc: new Float64Array(4), amp: new Float64Array(4), k: new Float64Array(4), stamp: 0, att: 0 }));
-    }
-    strike(note, vel, delaySamples) {
-      if (this.pending.length < 32) this.pending.push({ note, vel: clamp(vel, 0, 1), left: Math.max(0, delaySamples | 0) });
-    }
-    start(note, vel) {
-      let v = this.v.find((x) => !x.on);
-      if (!v) { v = this.v[0]; for (const x of this.v) if (x.stamp < v.stamp) v = x; }
-      const hz = 440 * Math.pow(2, (note - 69) / 12), shorten = Math.pow(2, -(note - 84) / 24);   // higher bars ring shorter
-      for (let i = 0; i < 4; i++) {
-        const f = hz * BELL_RATIO[i];
-        v.inc[i] = f < 0.45 * this.sr ? f / this.sr : 0;
-        v.amp[i] = BELL_AMP[i] * vel * (0.6 + 0.4 * vel);
-        v.k[i] = Math.pow(0.001, 1 / Math.max(1, this.sr * BELL_DECAY[i] * clamp(shorten, 0.4, 1.6)));
-        v.ph[i] = 0;
-      }
-      v.att = 0; v.on = true; v.stamp = ++this.stamp;
-    }
-    process() {
-      const p = this.pending;
-      for (let k = 0; k < p.length;) {
-        if (p[k].left-- > 0) { k++; continue; }
-        this.start(p[k].note, p[k].vel); p[k] = p[p.length - 1]; p.pop();
-      }
-      let out = 0;
-      for (const v of this.v) {
-        if (!v.on) continue;
-        if (v.att < 1) v.att = Math.min(1, v.att + 1 / (0.0015 * this.sr));
-        let s = 0, live = false;
-        for (let i = 0; i < 4; i++) {
-          if (!v.inc[i]) continue;
-          s += Math.sin(TAU * v.ph[i]) * v.amp[i];
-          v.ph[i] += v.inc[i]; if (v.ph[i] >= 1) v.ph[i] -= 1;
-          v.amp[i] *= v.k[i];
-          if (v.amp[i] > 1e-4) live = true;
-        }
-        if (!live) { v.on = false; continue; }
-        out += s * v.att;
-      }
-      return out * 0.35 * this.gain;
-    }
-  }
-
   // ---- WaterHarp: the effects pad's chain ---------------------------------------
   // Everything the right thumb plays, after the ensemble and before the echo
   // (so echoes repeat the gated, filtered sound), all locked to one tempo:
@@ -892,8 +772,6 @@ function TouchGrassEngine() {
       this.juno = new JunoSection(sr, 12);
       this.junoGain = 1.7;
       this.bow = new BowLayer(sr);       // WaterHarp: flowing water sings
-      this.bells = new Bells(sr);        // WaterHarp: splashes ring
-      this.acid = new AcidVoice(sr);     // WaterHarp: the 303-style line
       this.fx = new FxChain(sr);         // WaterHarp: the effects pad
       this.delayDiv = 1;
       this.plucks = Array.from({ length: pluckVoices }, () => new PluckVoice(sr));
@@ -932,7 +810,6 @@ function TouchGrassEngine() {
       const n = VOICES.length; this.voiceIndex = ((i % n) + n) % n; this.updateDecay();
       const v = VOICES[this.voiceIndex];
       if (v.juno) this.juno.setPatch(JUNO_PATCHES[v.juno]);
-      if (!v.acid) this.acid.allOff();
     }
     setRing(s) { this.ringSeconds = clamp(s, 0.2, 30); this.updateDecay(); }
     setDroneLevel(v) { this.droneTarget = clamp(v, 0, 1); }
@@ -941,7 +818,7 @@ function TouchGrassEngine() {
     setEnsembleMix(m) { this.ensemble.mix = clamp(m, 0, 1); }
     setMaster(g) { this.masterTarget = clamp(g, 0, 2); }
     setTone(t) { this.toneTarget = clamp(t, 0, 1); }
-    allOff() { this.pending.length = 0; this.cello.allOff(); this.ney.allOff(); this.juno.allOff(); this.acid.allOff(); for (const v of this.plucks) v.stopQuickly(); for (const v of this.drone) v.noteOff(); this.chord = null; }
+    allOff() { this.pending.length = 0; this.cello.allOff(); this.ney.allOff(); this.juno.allOff(); for (const v of this.plucks) v.stopQuickly(); for (const v of this.drone) v.noteOff(); this.chord = null; }
     activePlucks() { let n = 0; for (const v of this.plucks) if (v.active) n++; return n; }
 
     updateDecay() {
@@ -951,11 +828,6 @@ function TouchGrassEngine() {
     }
     startNote(note, vel, bright = 1) {
       if (note < 0 || note > 127) return;
-      if (VOICES[this.voiceIndex].acid) {
-        // a short gate, so a quick sweep overlaps and slides, slower plucks restrike
-        this.acid.strike(note, vel, clamp(this.ringSeconds * 0.035, 0.06, 0.3), 0);
-        return;
-      }
       if (VOICES[this.voiceIndex].synth) {
         const hold = clamp(this.ringSeconds * (this.juno.patch.hold ?? 0.3), 0.08, 3);
         this.juno.start(note, vel, bright, hold, clamp(this.ringSeconds * 0.5, 0.4, 8), ++this.stamp);
@@ -1017,7 +889,7 @@ function TouchGrassEngine() {
         strings += this.cello.process() * this.celloGain;
         strings += this.ney.process() * this.neyGain;
         strings += this.juno.process() * this.junoGain;
-        strings += this.bow.process() + this.bells.process() + this.acid.process();
+        strings += this.bow.process();
 
         this.tone += (this.toneTarget - this.tone) * 0.002;
         if ((this.toneTick++ & 15) === 0) {
@@ -1067,15 +939,14 @@ function TouchGrassEngine() {
         case "chordOff": for (const v of this.drone) v.noteOff(); this.chord = null; break;
         case "bow": this.bow.set(c.lv, c.nt, c.br); break;
         case "bowMode": this.bow.setMode(c.v); break;
-        case "bell": this.bells.strike(c.note, c.vel, Math.round((c.delay || 0) * this.sr)); break;
         case "fx": this.fx.set(c); if (c.bpm) this.delay.setTiming(this.fx.bpm, this.delayDiv); break;
         case "space": this.delayDiv = clamp(c.div | 0, 0, 2); this.delay.setAmount(c.send, c.fb); this.delay.setTiming(this.fx.bpm, this.delayDiv); break;
-        case "layers": if (c.bow != null) this.bow.gain = clamp(c.bow, 0, 2); if (c.bell != null) this.bells.gain = clamp(c.bell, 0, 2); break;
+        case "layers": if (c.bow != null) this.bow.gain = clamp(c.bow, 0, 2); break;
       }
     }
   }
 
-  return { GrassEngine, plate, VOICES, CelloVoice, NeyVoice, BowLayer, Bells };
+  return { GrassEngine, plate, VOICES, CelloVoice, NeyVoice, BowLayer };
 }
 
 // The AudioWorklet side: a processor that owns one engine and takes commands

@@ -1,4 +1,4 @@
-// node test/flowtest.js -> what the bow layer and the bells would hear.
+// node test/flowtest.js -> what the bow layer would hear, and the droplets that leave flecks.
 // flow: per string, depth x mean sideways speed of the water on it (tank
 // widths a second); a flowing string should sing, still water stay silent.
 // drops: loose particles (little water around them) crossing a string.
